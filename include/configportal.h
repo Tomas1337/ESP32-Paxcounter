@@ -3,10 +3,9 @@
 
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
-#include <LittleFS.h>
+#include <SPIFFS.h>
 #include <ArduinoJson.h>
 #include "globals.h"
-// #include "wifiscan.h"  // For wifi_sniffer_stop()
 
 // Extern declarations
 extern bool config_portal_active;

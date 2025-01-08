@@ -3,6 +3,8 @@
 
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include <FS.h>
+#include <LittleFS.h>
 
 // Structure for probe data
 struct ProbeData {

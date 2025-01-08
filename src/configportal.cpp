@@ -1,6 +1,5 @@
 #include "configportal.h"
 #include "esp_log.h"
-#include <LittleFS.h>
 
 static const char* CONFIG_TAG = "CONFIG_PORTAL";
 static AsyncWebServer* server = nullptr;
@@ -56,9 +55,9 @@ static const char index_html[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 void init_config_portal() {
-    // Initialize LittleFS
-    if(!LittleFS.begin(true)) {
-        ESP_LOGE(CONFIG_TAG, "An error occurred while mounting LittleFS");
+    // Initialize SPIFFS
+    if(!SPIFFS.begin(true)) {
+        ESP_LOGE(CONFIG_TAG, "An error occurred while mounting SPIFFS");
         return;
     }
     
@@ -72,9 +71,6 @@ void start_config_portal() {
     }
     
     server = new AsyncWebServer(80);
-    
-    // Stop WiFi scanning
-    // wifi_sniffer_stop();
     
     // Set up AP mode
     WiFi.mode(WIFI_AP);
@@ -142,7 +138,7 @@ void save_config_to_spiffs(const char* ssid, const char* password, const char* m
     doc["mqtt_server"] = mqtt_server;
     doc["mqtt_port"] = mqtt_port;
     
-    File configFile = LittleFS.open(CONFIG_FILE, "w");
+    File configFile = SPIFFS.open(CONFIG_FILE, "w");
     if (!configFile) {
         ESP_LOGE(CONFIG_TAG, "Failed to open config file for writing");
         return;
@@ -150,16 +146,16 @@ void save_config_to_spiffs(const char* ssid, const char* password, const char* m
     
     serializeJson(doc, configFile);
     configFile.close();
-    ESP_LOGI(CONFIG_TAG, "Configuration saved to LittleFS");
+    ESP_LOGI(CONFIG_TAG, "Configuration saved to SPIFFS");
 }
 
 bool load_config_from_spiffs() {
-    if (!LittleFS.exists(CONFIG_FILE)) {
+    if (!SPIFFS.exists(CONFIG_FILE)) {
         ESP_LOGI(CONFIG_TAG, "No configuration file found");
         return false;
     }
     
-    File configFile = LittleFS.open(CONFIG_FILE, "r");
+    File configFile = SPIFFS.open(CONFIG_FILE, "r");
     if (!configFile) {
         ESP_LOGE(CONFIG_TAG, "Failed to open config file for reading");
         return false;
@@ -180,6 +176,6 @@ bool load_config_from_spiffs() {
     const char* mqtt_server = doc["mqtt_server"] | "";
     uint16_t mqtt_port = doc["mqtt_port"] | 1883;
     
-    ESP_LOGI(CONFIG_TAG, "Configuration loaded from LittleFS");
+    ESP_LOGI(CONFIG_TAG, "Configuration loaded from SPIFFS");
     return true;
 } 

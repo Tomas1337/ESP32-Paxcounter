@@ -81,6 +81,7 @@ BME_IRQ         <- setBMEIRQ() <- Ticker.h
 #include "mqtthandler.h"
 #include <time.h>
 #include "configportal.h"
+#include <SPIFFS.h>
 
 // NTP Server settings
 #define NTP_SERVER "time.google.com"

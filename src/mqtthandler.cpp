@@ -7,6 +7,7 @@
 #include "globals.h"
 #include <time.h>
 #include "configportal.h"
+#include <SPIFFS.h>
 
 // #ifndef MQTT_SERVER
 // #define MQTT_SERVER MQTT_SERVER
