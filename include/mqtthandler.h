@@ -32,4 +32,7 @@ bool pax_mqtt_connect();
 // Hook function for WiFi sniffer
 void wifi_packet_handler_hook(uint8_t* mac, int8_t rssi);
 
+// Hook function for BLE sniffer
+void ble_packet_handler_hook(uint8_t* mac, int8_t rssi);
+
 #endif

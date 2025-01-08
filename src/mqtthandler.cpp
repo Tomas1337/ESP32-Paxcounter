@@ -262,12 +262,12 @@ void pax_mqtt_enqueue_device(const uint8_t* mac, int8_t rssi, bool is_wifi) {
         deviceBuffer.count++;
         portEXIT_CRITICAL(&deviceMux);
         
-        // ESP_LOGI(MQTT_TAG, "Enqueued device: MAC=%02x:%02x:%02x:%02x:%02x:%02x RSSI=%d Type=%s", 
-        //         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-        //         rssi, is_wifi ? "WiFi" : "BLE");
+        ESP_LOGD(MQTT_TAG, "Enqueued device: MAC=%02x:%02x:%02x:%02x:%02x:%02x RSSI=%d Type=%s", 
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+                rssi, is_wifi ? "WiFi" : "BLE");
     } else {
         portEXIT_CRITICAL(&deviceMux);
-        // ESP_LOGW(MQTT_TAG, "Device buffer full, dropping packet");
+        ESP_LOGW(MQTT_TAG, "Device buffer full, dropping packet");
     }
 }
 
@@ -383,4 +383,12 @@ void IRAM_ATTR wifi_packet_handler_hook(uint8_t* mac, int8_t rssi) {
     
     // Minimize logging in ISR context
     pax_mqtt_enqueue_device(mac, rssi, true);
+} 
+
+// Hook function implementation for BLE sniffer
+void IRAM_ATTR ble_packet_handler_hook(uint8_t* mac, int8_t rssi) {
+    if (!mac) return;
+    
+    // Minimize logging in ISR context
+    pax_mqtt_enqueue_device(mac, rssi, false);
 } 
