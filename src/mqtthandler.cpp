@@ -6,31 +6,32 @@
 #include "libpax_helpers.h"
 #include "globals.h"
 #include <time.h>
+#include "configportal.h"
 
-#ifndef MQTT_SERVER
-#define MQTT_SERVER MQTT_SERVER
-#endif
+// #ifndef MQTT_SERVER
+// #define MQTT_SERVER MQTT_SERVER
+// #endif
 
-#ifndef MQTT_PORT
-#define MQTT_PORT MQTT_PORT
-#endif
+// #ifndef MQTT_PORT
+// #define MQTT_PORT MQTT_PORT
+// #endif
 
-#ifndef MQTT_OUTTOPIC
-#define MQTT_OUTTOPIC MQTT_OUTTOPIC
-#endif
+// #ifndef MQTT_OUTTOPIC
+// #define MQTT_OUTTOPIC MQTT_OUTTOPIC
+// #endif
 
 
-#ifndef MQTT_TRIGGER_PIN
-#define MQTT_TRIGGER_PIN MQTT_TRIGGER_PIN
-#endif
+// #ifndef MQTT_TRIGGER_PIN
+// #define MQTT_TRIGGER_PIN MQTT_TRIGGER_PIN
+// #endif
 
-#ifndef MQTT_TRIGGER_MODE
-#define MQTT_TRIGGER_MODE MQTT_TRIGGER_MODE
-#endif
+// #ifndef MQTT_TRIGGER_MODE
+// #define MQTT_TRIGGER_MODE MQTT_TRIGGER_MODE
+// #endif
 
-#ifndef MQTT_SEND_INTERVAL
-#define MQTT_SEND_INTERVAL MQTT_SEND_INTERVAL
-#endif
+// #ifndef MQTT_SEND_INTERVAL
+// #define MQTT_SEND_INTERVAL MQTT_SEND_INTERVAL
+// #endif
 
 static const char* MQTT_TAG = "MQTT_HANDLER";
 
@@ -277,8 +278,36 @@ bool pax_mqtt_connect() {
         return false;
     }
     
+    // Try to load configuration from SPIFFS
+    StaticJsonDocument<512> doc;
+    File configFile = SPIFFS.open(CONFIG_FILE, "r");
+    if (configFile) {
+        DeserializationError error = deserializeJson(doc, configFile);
+        configFile.close();
+        
+        if (!error) {
+            const char* mqtt_server = doc["mqtt_server"] | MQTT_SERVER;
+            uint16_t mqtt_port = doc["mqtt_port"] | MQTT_PORT;
+            
+            if (!paxMqttClient.connected()) {
+                ESP_LOGI(MQTT_TAG, "Connecting to MQTT broker %s:%d...", mqtt_server, mqtt_port);
+                paxMqttClient.setServer(mqtt_server, mqtt_port);
+                paxMqttClient.setKeepAlive(MQTT_KEEPALIVE);
+                
+                if (paxMqttClient.connect(MQTT_CLIENTNAME)) {
+                    ESP_LOGI(MQTT_TAG, "Connected to MQTT broker");
+                    return true;
+                } else {
+                    ESP_LOGE(MQTT_TAG, "Failed to connect to MQTT broker");
+                    return false;
+                }
+            }
+        }
+    }
+    
+    // Fall back to default configuration if SPIFFS read fails
     if (!paxMqttClient.connected()) {
-        ESP_LOGI(MQTT_TAG, "Connecting to MQTT broker...");
+        ESP_LOGI(MQTT_TAG, "Using default MQTT configuration...");
         paxMqttClient.setServer(MQTT_SERVER, MQTT_PORT);
         paxMqttClient.setKeepAlive(MQTT_KEEPALIVE);
         

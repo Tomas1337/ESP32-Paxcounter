@@ -80,6 +80,7 @@ BME_IRQ         <- setBMEIRQ() <- Ticker.h
 #include "main.h"
 #include "mqtthandler.h"
 #include <time.h>
+#include "configportal.h"
 
 // NTP Server settings
 #define NTP_SERVER "time.google.com"
@@ -100,8 +101,38 @@ void print_current_time() {
 }
 
 // Function to sync time with NTP
-bool sync_time_with_ntp() {
-    ESP_LOGI(MAIN_TAG, "Connecting to WiFi for time sync...");
+bool connect_wifi_with_config() {
+    // Try to load configuration from SPIFFS
+    StaticJsonDocument<512> doc;
+    File configFile = SPIFFS.open(CONFIG_FILE, "r");
+    if (configFile) {
+        DeserializationError error = deserializeJson(doc, configFile);
+        configFile.close();
+        
+        if (!error) {
+            const char* ssid = doc["wifi_ssid"] | WIFI_SSID;
+            const char* password = doc["wifi_password"] | WIFI_PASSWORD;
+            
+            ESP_LOGI(MAIN_TAG, "Connecting to WiFi with configuration from SPIFFS...");
+            WiFi.mode(WIFI_STA);
+            WiFi.begin(ssid, password);
+            
+            int attempts = 0;
+            while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                ESP_LOGI(MAIN_TAG, "Attempting to connect to WiFi... (%d/20)", attempts + 1);
+                attempts++;
+            }
+            
+            if (WiFi.status() == WL_CONNECTED) {
+                ESP_LOGI(MAIN_TAG, "WiFi connected successfully!");
+                return true;
+            }
+        }
+    }
+    
+    // Fall back to default configuration
+    ESP_LOGI(MAIN_TAG, "Using default WiFi configuration...");
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     
@@ -112,12 +143,22 @@ bool sync_time_with_ntp() {
         attempts++;
     }
     
-    if (WiFi.status() != WL_CONNECTED) {
+    if (WiFi.status() == WL_CONNECTED) {
+        ESP_LOGI(MAIN_TAG, "WiFi connected successfully!");
+        return true;
+    }
+    
+    ESP_LOGE(MAIN_TAG, "Failed to connect to WiFi");
+    return false;
+}
+
+bool sync_time_with_ntp() {
+    ESP_LOGI(MAIN_TAG, "Connecting to WiFi for time sync...");
+    
+    if (!connect_wifi_with_config()) {
         ESP_LOGE(MAIN_TAG, "Failed to connect to WiFi for time sync");
         return false;
     }
-    
-    ESP_LOGI(MAIN_TAG, "WiFi connected successfully!");
     
     // Configure NTP
     configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
@@ -165,6 +206,30 @@ bool sync_time_with_ntp() {
 #endif
 
 char clientId[20] = {0}; // unique ClientID
+
+static volatile uint8_t button_press_count = 0;
+static volatile unsigned long last_button_press = 0;
+
+void IRAM_ATTR config_button_isr() {
+    unsigned long current_time = millis();
+    if (current_time - last_button_press > 200) {  // Debounce
+        button_press_count++;
+        last_button_press = current_time;
+        
+        // Check if we've reached the threshold within the timeout window
+        if (button_press_count >= BUTTON_PRESS_THRESHOLD) {
+            // We'll handle the actual portal start in the main loop to avoid doing too much in ISR
+            button_press_count = 0;  // Reset counter
+            config_portal_active = true;
+        }
+        
+        // Reset counter if we're outside the timeout window
+        if (current_time - last_button_press > BUTTON_PRESS_TIMEOUT) {
+            button_press_count = 1;  // Count current press
+            last_button_press = current_time;
+        }
+    }
+}
 
 void setup() {
   char features[100] = "";
@@ -439,12 +504,27 @@ void setup() {
   // Initialize MQTT handler
   pax_mqtt_init();
 
+  // Initialize configuration portal
+  init_config_portal();
+  
+  // Set up boot button for configuration portal
+  pinMode(0, INPUT_PULLUP);  // GPIO0 is usually the BOOT button
+  attachInterrupt(0, config_button_isr, FALLING);
+
   vTaskDelete(NULL);
 } // setup()
 
 void loop() {
-  // Handle MQTT operations
-  pax_mqtt_loop();
-  
-  vTaskDelete(NULL);
+    if (is_config_portal_active()) {
+        start_config_portal();
+        while (is_config_portal_active()) {
+            handle_config_portal();
+            delay(10);
+        }
+    }
+    
+    // Handle MQTT operations
+    pax_mqtt_loop();
+    
+    vTaskDelete(NULL);
 }
