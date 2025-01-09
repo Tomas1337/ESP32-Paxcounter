@@ -171,6 +171,9 @@ char clientId[20] = {0}; // unique ClientID
 
 void setup() {
   char features[100] = "";
+  #ifdef HAS_BUTTON
+    strcat_P(features, " BTN");
+  #endif
 
   // Initialize configuration portal
   init_config_portal();
@@ -409,14 +412,14 @@ void setup() {
 
   // configure WIFI sniffing
   strcpy(configuration.wifi_my_country_str, WIFI_MY_COUNTRY);
-  configuration.wificounter = cfg.wifiscan;
+  configuration.wificounter = false;  // Temporarily disable WiFi scanning
   configuration.wifi_channel_map = cfg.wifichanmap;
   configuration.wifi_channel_switch_interval = cfg.wifichancycle;
   configuration.wifi_rssi_threshold = cfg.rssilimit;
   ESP_LOGI(TAG, "WIFISCAN: %s", cfg.wifiscan ? "on" : "off");
 
   // configure BLE sniffing
-  configuration.blecounter = cfg.blescan;
+  configuration.blecounter = false;  // Temporarily disable BLE scanning
   configuration.blescantime = cfg.blescantime;
   configuration.ble_rssi_threshold = cfg.rssilimit;
   ESP_LOGI(TAG, "BLESCAN: %s", cfg.blescan ? "on" : "off");
@@ -432,16 +435,19 @@ void setup() {
   ESP_LOGI(TAG, "Starting rcommand interpreter...");
   rcmd_init();
 
-  // cyclic function interrupts
-  ESP_LOGI(TAG, "Attaching cyclic timer...");
-  cyclicTimer.attach(HOMECYCLE, setCyclicIRQ);
-  ESP_LOGI(TAG, "Cyclic timer attached");
+  // Initialize MQTT handler
+  pax_mqtt_init();
 
   // show compiled features
   ESP_LOGI(TAG, "Features:%s", features);
 
   // set runmode to normal
   RTC_runmode = RUNMODE_NORMAL;
+
+  // Initialize button controller before IRQ handler
+  ESP_LOGI(TAG, "Starting Button Controller...");
+  button_init();
+  ESP_LOGI(TAG, "Button Controller started");
 
   // start state machine
   ESP_LOGI(TAG, "Starting Interrupt Handler...");
@@ -464,9 +470,6 @@ void setup() {
   } else {
       ESP_LOGE(MAIN_TAG, "Time sync failed");
   }
-
-  // Initialize MQTT handler
-  pax_mqtt_init();
 
   vTaskDelete(NULL);
 } // setup()

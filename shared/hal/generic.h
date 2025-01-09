@@ -78,7 +78,9 @@
 #ifndef HAS_LED
 #define HAS_LED NOT_A_PIN  // Define as NOT_A_PIN if no LED is present
 #endif
-#define HAS_BUTTON (39) // on board button
+#define HAS_BUTTON (2) 
+#define BUTTON_PULLUP 1  // Enable pullup for boot button
+#define BUTTON_ACTIVEHIGH 0  // Button is active low
 //#define RGB_LED_COUNT 1 // we have 1 LED
 //#define HAS_RGB_LED FastLED.addLeds<WS2812, GPIO_NUM_0, GRB>(leds, RGB_LED_COUNT);
 

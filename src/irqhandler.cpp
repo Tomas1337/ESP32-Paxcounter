@@ -27,12 +27,6 @@ void irqHandler(void *pvParameters) {
     )
       continue;
 
-// button pressed?
-#ifdef HAS_BUTTON
-    if (irqSource & BUTTON_IRQ)
-      readButton();
-#endif
-
 // display needs refresh?
 #ifdef HAS_DISPLAY
     if (irqSource & DISPLAY_IRQ)
@@ -59,8 +53,9 @@ void irqHandler(void *pvParameters) {
 #endif
 
     // are cyclic tasks due?
-    if (irqSource & CYCLIC_IRQ)
+    if (irqSource & CYCLIC_IRQ) {
       doHousekeeping();
+    }
 
 // do we have a power event?
 #ifdef HAS_PMU
