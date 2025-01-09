@@ -476,11 +476,13 @@ void setup() {
 
 void loop() {
     if (is_config_portal_active()) {
+        ESP_LOGI(TAG, "Config portal is active, starting portal...");
         start_config_portal();
         while (is_config_portal_active()) {
             handle_config_portal();
             delay(10);
         }
+        ESP_LOGI(TAG, "Config portal closed");
     }
     
     // Handle MQTT operations

@@ -3,6 +3,7 @@
 #include "globals.h"
 #include "button.h"
 #include "configportal.h"
+#include "mqtthandler.h"
 
 static const char* BUTTON_TAG = "BUTTON";
 static volatile uint8_t button_press_count = 0;
@@ -30,8 +31,20 @@ void handle_button_press() {
     
     if (button_press_count >= BUTTON_PRESS_THRESHOLD) {
         ESP_LOGI(BUTTON_TAG, "Starting config portal");
+        
+        // Disconnect from any existing WiFi connection
+        if (WiFi.status() == WL_CONNECTED) {
+            ESP_LOGI(BUTTON_TAG, "Disconnecting from WiFi for config portal");
+            WiFi.disconnect(true);
+            delay(100); // Give WiFi time to disconnect
+        }
+        
+        // Set flag and start portal
         config_portal_active = true;
         button_press_count = 0;
+        
+        // Directly start the portal
+        start_config_portal();
     }
 }
 

@@ -156,3 +156,11 @@ void IRAM_ATTR wifi_packet_handler_hook(uint8_t* mac, int8_t rssi) {
             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], rssi);
 #endif
 } 
+
+// void pax_mqtt_disconnect() {
+//     ESP_LOGI(MQTT_TAG, "Disconnecting from MQTT server");
+//     if (mqttClient.connected()) {
+//         mqttClient.disconnect();
+//     }
+//     shouldSendMQTT = false;
+// } 

@@ -14,6 +14,7 @@ void pax_mqtt_init(void);
 void pax_mqtt_loop(void);
 void pax_mqtt_enqueue(uint16_t pax, uint16_t wifi_count, uint16_t ble_count);
 void pax_mqtt_connect(void);
+// void pax_mqtt_disconnect(void);
 
 extern volatile bool shouldSendMQTT;
 
