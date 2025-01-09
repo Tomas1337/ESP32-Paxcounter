@@ -1,9 +1,8 @@
 #ifndef _CONFIGPORTAL_H
 #define _CONFIGPORTAL_H
 
-#include <ESPAsyncWebServer.h>
-#include <AsyncTCP.h>
-#include <SPIFFS.h>
+#include <WebServer.h>
+#include "esp_spiffs.h"
 #include "globals.h"
 #include "configmanager.h"
 
@@ -11,6 +10,7 @@
 #define CONFIG_AP_SSID "ESP32-Paxcounter"
 #define CONFIG_AP_PASSWORD "configure123"
 #define CONFIG_PORTAL_TIMEOUT 300 // 5 minutes timeout
+#define CONFIG_FILE_PATH "/spiffs/config.json"
 
 // Function declarations
 void init_config_portal(void);

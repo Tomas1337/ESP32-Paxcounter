@@ -1,7 +1,8 @@
 #include "configportal.h"
 #include <ArduinoJson.h>
+#include "esp_log.h"
 
-static AsyncWebServer portal_server(80);
+static WebServer portal_server(80);
 volatile bool config_portal_active = false;
 static unsigned long portal_start_time = 0;
 
@@ -62,45 +63,43 @@ const char CONFIG_HTML[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
+void handleRoot() {
+    portal_server.send(200, "text/html", CONFIG_HTML);
+}
+
+void handleSave() {
+    String ssid = portal_server.arg("ssid");
+    String password = portal_server.arg("password");
+    String mqtt_server = portal_server.arg("mqtt_server");
+    String mqtt_topic = portal_server.arg("mqtt_topic");
+    int mqtt_port = portal_server.arg("mqtt_port").toInt();
+
+    save_wifi_config(ssid.c_str(), password.c_str(), mqtt_server.c_str(), 
+                    mqtt_port, mqtt_topic.c_str());
+
+    portal_server.send(200, "text/plain", "Configuration saved. Device will restart...");
+    delay(2000);
+    ESP.restart();
+}
+
 void init_config_portal() {
-    // Initialize SPIFFS
-    if(!SPIFFS.begin(true)) {
-        ESP_LOGE(TAG, "An error occurred while mounting SPIFFS");
+    // Initialize SPIFFS if not already initialized
+    esp_vfs_spiffs_conf_t conf = {
+        .base_path = "/spiffs",
+        .partition_label = NULL,
+        .max_files = 5,
+        .format_if_mount_failed = true
+    };
+
+    esp_err_t ret = esp_vfs_spiffs_register(&conf);
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
         return;
     }
     
     // Setup configuration portal endpoints
-    portal_server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send_P(200, "text/html", CONFIG_HTML);
-    });
-    
-    portal_server.on("/save", HTTP_POST, [](AsyncWebServerRequest *request) {
-        String ssid, password, mqtt_server, mqtt_topic;
-        int mqtt_port = 1883;
-        
-        if(request->hasParam("ssid", true)) {
-            ssid = request->getParam("ssid", true)->value();
-        }
-        if(request->hasParam("password", true)) {
-            password = request->getParam("password", true)->value();
-        }
-        if(request->hasParam("mqtt_server", true)) {
-            mqtt_server = request->getParam("mqtt_server", true)->value();
-        }
-        if(request->hasParam("mqtt_port", true)) {
-            mqtt_port = request->getParam("mqtt_port", true)->value().toInt();
-        }
-        if(request->hasParam("mqtt_topic", true)) {
-            mqtt_topic = request->getParam("mqtt_topic", true)->value();
-        }
-        
-        save_wifi_config(ssid.c_str(), password.c_str(), mqtt_server.c_str(), 
-                        mqtt_port, mqtt_topic.c_str());
-        
-        request->send(200, "text/plain", "Configuration saved. Device will restart...");
-        delay(2000);
-        ESP.restart();
-    });
+    portal_server.on("/", HTTP_GET, handleRoot);
+    portal_server.on("/save", HTTP_POST, handleSave);
 }
 
 void start_config_portal() {
@@ -119,6 +118,8 @@ void start_config_portal() {
 
 void handle_config_portal() {
     if (config_portal_active) {
+        portal_server.handleClient();
+        
         // Check for timeout
         if (millis() - portal_start_time > CONFIG_PORTAL_TIMEOUT * 1000) {
             ESP_LOGI(TAG, "Configuration portal timed out");
@@ -135,24 +136,32 @@ bool is_config_portal_active() {
 
 void save_wifi_config(const char* ssid, const char* password, const char* mqtt_server, 
                     int mqtt_port, const char* mqtt_topic) {
-    // Create a file to store the configuration
-    File configFile = SPIFFS.open("/config.json", "w");
-    if (!configFile) {
-        ESP_LOGE(TAG, "Failed to open config file for writing");
-        return;
-    }
-    
+    // Create JSON document
     StaticJsonDocument<512> doc;
     doc["wifi_ssid"] = ssid;
     doc["wifi_password"] = password;
     doc["mqtt_server"] = mqtt_server;
     doc["mqtt_port"] = mqtt_port;
     doc["mqtt_topic"] = mqtt_topic;
-    
-    if (serializeJson(doc, configFile) == 0) {
-        ESP_LOGE(TAG, "Failed to write to config file");
+
+    // Serialize JSON to string
+    String jsonString;
+    serializeJson(doc, jsonString);
+
+    // Open file for writing
+    FILE* f = fopen(CONFIG_FILE_PATH, "w");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "Failed to open config file for writing");
+        return;
     }
-    configFile.close();
-    
-    ESP_LOGI(TAG, "Configuration saved successfully");
+
+    // Write to file
+    size_t written = fwrite(jsonString.c_str(), 1, jsonString.length(), f);
+    fclose(f);
+
+    if (written == jsonString.length()) {
+        ESP_LOGI(TAG, "Configuration saved successfully");
+    } else {
+        ESP_LOGE(TAG, "Failed to write configuration");
+    }
 } 

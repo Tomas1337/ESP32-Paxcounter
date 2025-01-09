@@ -1,6 +1,5 @@
 #include "mqtthandler.h"
 #include "wificonfig.h"
-#include <SPIFFS.h>
 #include <ArduinoJson.h>
 
 static const char* MQTT_TAG = "MQTT";
@@ -39,12 +38,36 @@ void pax_mqtt_enqueue(uint16_t pax, uint16_t wifi_count, uint16_t ble_count) {
 }
 
 void pax_mqtt_connect() {
-    // Load configuration from SPIFFS if not already loaded
-    if (SPIFFS.exists("/config.json")) {
-        File configFile = SPIFFS.open("/config.json", "r");
-        if (configFile) {
+    // Initialize SPIFFS if not already initialized
+    esp_vfs_spiffs_conf_t conf = {
+        .base_path = "/spiffs",
+        .partition_label = NULL,
+        .max_files = 5,
+        .format_if_mount_failed = true
+    };
+
+    esp_err_t ret = esp_vfs_spiffs_register(&conf);
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(MQTT_TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+        return;
+    }
+
+    // Load configuration from file
+    FILE* f = fopen(CONFIG_FILE_PATH, "r");
+    if (f != NULL) {
+        // Get file size
+        fseek(f, 0, SEEK_END);
+        size_t size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+
+        // Read file content
+        char* buf = (char*)malloc(size + 1);
+        if (buf) {
+            size_t read = fread(buf, 1, size, f);
+            buf[read] = '\0';  // Ensure null termination
+
             StaticJsonDocument<512> doc;
-            DeserializationError error = deserializeJson(doc, configFile);
+            DeserializationError error = deserializeJson(doc, buf);
             
             if (!error) {
                 wifiConfig.ssid = doc["wifi_ssid"].as<String>();
@@ -52,10 +75,13 @@ void pax_mqtt_connect() {
                 wifiConfig.mqtt_server = doc["mqtt_server"].as<String>();
                 wifiConfig.mqtt_topic = doc["mqtt_topic"].as<String>();
                 wifiConfig.mqtt_port = doc["mqtt_port"].as<int>();
-                ESP_LOGI(MQTT_TAG, "Loaded configuration from SPIFFS");
+                ESP_LOGI(MQTT_TAG, "Loaded configuration from file");
             }
-            configFile.close();
+            free(buf);
         }
+        fclose(f);
+    } else {
+        ESP_LOGI(MQTT_TAG, "No saved configuration found, using defaults");
     }
     
     // Connect to WiFi using available credentials
@@ -125,8 +151,6 @@ void pax_mqtt_init() {
 void IRAM_ATTR wifi_packet_handler_hook(uint8_t* mac, int8_t rssi) {
     if (!mac) return;
     
-    // We can optionally enqueue this data for MQTT publishing
-    // For now, we'll just log it if in debug mode
 #if (VERBOSE)
     ESP_LOGD(MQTT_TAG, "WiFi packet: MAC=%02x:%02x:%02x:%02x:%02x:%02x RSSI=%d",
             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], rssi);

@@ -5,6 +5,9 @@
 #include <PubSubClient.h>
 #include "globals.h"
 #include "esp_log.h"
+#include "esp_spiffs.h"
+
+#define CONFIG_FILE_PATH "/spiffs/config.json"
 
 // Function declarations
 void pax_mqtt_init(void);
