@@ -117,8 +117,8 @@ pax_mqtt_enqueue(count.pax, count.wifi_count, count.ble_count);
       );
 #endif // HAS_SDCARD
 
-      SendPayload(COUNTERPORT);
-      break; // case COUNTDATA
+      // SendPayload(COUNTERPORT);
+      // break; // case COUNTDATA
 
 #if (HAS_BME)
     case MEMS_DATA:
@@ -169,11 +169,13 @@ pax_mqtt_enqueue(count.pax, count.wifi_count, count.ble_count);
 #endif
 
 #if (defined BAT_MEASURE_ADC || defined HAS_PMU)
+    // case BATT_DATA:
+    //   payload.reset();
+    //   payload.addVoltage(read_voltage());
+    //   SendPayload(BATTPORT);
+    //   break;
     case BATT_DATA:
-      payload.reset();
-      payload.addVoltage(read_voltage());
-      SendPayload(BATTPORT);
-      break;
+      ESP_LOGD(TAG, "BATT_DATA HIT was trying to send battery data");
 #endif
     } // switch
     bitmask &= ~mask;
@@ -207,3 +209,4 @@ bool allQueuesEmtpy(void) {
 #endif
   return (rc == 0) ? true : false;
 }
+

@@ -359,13 +359,13 @@ void get_bme(uint8_t val[]) {
 
 void get_batt(uint8_t val[]) {
   ESP_LOGI(TAG, "Remote command: get battery voltage");
-#if (defined BAT_MEASURE_ADC || defined HAS_PMU)
-  payload.reset();
-  payload.addVoltage(read_voltage());
-  SendPayload(BATTPORT);
-#else
-  ESP_LOGW(TAG, "Battery voltage not supported");
-#endif
+// #if (defined BAT_MEASURE_ADC || defined HAS_PMU)
+//   payload.reset();
+//   payload.addVoltage(read_voltage());
+//   SendPayload(BATTPORT);
+// #else
+//   ESP_LOGW(TAG, "Battery voltage not supported");
+// #endif
 }
 
 void get_time(uint8_t val[]) {
