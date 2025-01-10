@@ -67,6 +67,9 @@ void sendData() {
   ESP_LOGD(TAG, "Sending count results: pax=%d / wifi=%d / ble=%d", count.pax,
            count.wifi_count, count.ble_count);
 
+  // Enqueue data for MQTT - this will trigger the MQTT task to send
+  pax_mqtt_enqueue(count.pax, count.wifi_count, count.ble_count);
+
   while (bitmask) {
     switch (bitmask & mask) {
     case COUNT_DATA:
@@ -77,9 +80,6 @@ void sendData() {
       if (cfg.blescan)
         payload.addCount(count.ble_count, MAC_SNIFF_BLE);
 #endif
-
-// Enqueue data for MQTT
-pax_mqtt_enqueue(count.pax, count.wifi_count, count.ble_count);
 
 #if (HAS_GPS)
       if (GPSPORT == COUNTERPORT) {
@@ -117,8 +117,7 @@ pax_mqtt_enqueue(count.pax, count.wifi_count, count.ble_count);
       );
 #endif // HAS_SDCARD
 
-      // SendPayload(COUNTERPORT);
-      // break; // case COUNTDATA
+      break;
 
 #if (HAS_BME)
     case MEMS_DATA:
@@ -169,13 +168,9 @@ pax_mqtt_enqueue(count.pax, count.wifi_count, count.ble_count);
 #endif
 
 #if (defined BAT_MEASURE_ADC || defined HAS_PMU)
-    // case BATT_DATA:
-    //   payload.reset();
-    //   payload.addVoltage(read_voltage());
-    //   SendPayload(BATTPORT);
-    //   break;
     case BATT_DATA:
       ESP_LOGD(TAG, "BATT_DATA HIT was trying to send battery data");
+      break;
 #endif
     } // switch
     bitmask &= ~mask;
