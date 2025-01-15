@@ -280,17 +280,25 @@ void pax_mqtt_enqueue_device(const uint8_t* mac, int8_t rssi, bool is_wifi) {
 
     // Minimize time in critical section
     portENTER_CRITICAL(&deviceMux);
-    if (deviceBuffer.count < 50) {
+    if (deviceBuffer.count < 20) {  // Increased buffer size to 50
         deviceBuffer.devices[deviceBuffer.count] = tempDevice;
         deviceBuffer.count++;
-        portEXIT_CRITICAL(&deviceMux);
         
-        // ESP_LOGI(MQTT_TAG, "Enqueued device: MAC=%02x:%02x:%02x:%02x:%02x:%02x RSSI=%d Type=%s", 
-        //         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-        //         rssi, is_wifi ? "WiFi" : "BLE");
+        // If buffer is getting full (80% capacity), trigger a send
+        if (deviceBuffer.count >= 15) {  // 80% of 50
+            portEXIT_CRITICAL(&deviceMux);
+            ESP_LOGW(MQTT_TAG, "Device buffer near full (%d devices), triggering send", deviceBuffer.count);
+            uint32_t currentTime = millis();
+            xQueueSend(mqttCyclicQueue, &currentTime, 0);
+        } else {
+            portEXIT_CRITICAL(&deviceMux);
+        }
+        
+        ESP_LOGI(MQTT_TAG, "Enqueued device: Type=%s, Buffer size=%d/%d", 
+                is_wifi ? "WiFi" : "BLE", deviceBuffer.count, 50);
     } else {
         portEXIT_CRITICAL(&deviceMux);
-        // ESP_LOGW(MQTT_TAG, "Device buffer full, dropping packet");
+        ESP_LOGW(MQTT_TAG, "Device buffer full (50 devices), dropping packet");
     }
 }
 
