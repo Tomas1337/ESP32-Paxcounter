@@ -413,14 +413,14 @@ void setup() {
 
   // configure WIFI sniffing
   strcpy(configuration.wifi_my_country_str, WIFI_MY_COUNTRY);
-  configuration.wificounter = false;  // Temporarily disable WiFi scanning
+  configuration.wificounter = cfg.wifiscan;
   configuration.wifi_channel_map = cfg.wifichanmap;
   configuration.wifi_channel_switch_interval = cfg.wifichancycle;
   configuration.wifi_rssi_threshold = cfg.rssilimit;
   ESP_LOGI(TAG, "WIFISCAN: %s", cfg.wifiscan ? "on" : "off");
 
   // configure BLE sniffing
-  configuration.blecounter = false;  // Temporarily disable BLE scanning
+  configuration.blecounter = cfg.blescan;
   configuration.blescantime = cfg.blescantime;
   configuration.ble_rssi_threshold = cfg.rssilimit;
   ESP_LOGI(TAG, "BLESCAN: %s", cfg.blescan ? "on" : "off");
