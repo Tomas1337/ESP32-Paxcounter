@@ -2,7 +2,10 @@
 #include "senddata.h"
 #include "mqtthandler.h"
 
-void setSendIRQ(void) { xTaskNotify(irqHandlerTask, SENDCYCLE_IRQ, eSetBits); }
+void setSendIRQ(void) { 
+  ESP_LOGI(TAG, "Setting send IRQ");  
+  xTaskNotify(irqHandlerTask, SENDCYCLE_IRQ, eSetBits); 
+  }
 
 // put data to send in RTos Queues used for transmit over channels Lora and SPI
 void SendPayload(uint8_t port) {

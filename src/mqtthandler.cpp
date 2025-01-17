@@ -104,6 +104,10 @@ static void __attribute__((noinline)) paxMqttTask(void* parameter) {
     TickType_t xLastWakeTime = xTaskGetTickCount();
 
     for (;;) {
+        if (portalActive) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            continue;
+        }
 #ifdef HAS_BUTTON
         if (get_button_press_count() >= 5) {
             reset_button_press_count();

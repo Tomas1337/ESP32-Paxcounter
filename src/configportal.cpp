@@ -7,7 +7,7 @@
 
 static const char* CONFIG_TAG = "CONFIG_PORTAL";
 static WebServer server(80);
-static bool portalActive = false;
+bool portalActive = false;
 
 // Move the HTML string to flash memory
 static const char CONFIG_HTML[] PROGMEM = R"(
@@ -92,7 +92,7 @@ void startConfigPortal() {
         ESP_LOGW(CONFIG_TAG, "Config portal already active");
         return;
     }
-
+    libpax_counter_stop();  // This shuts down all promiscuous sniffing
     ESP_LOGI(CONFIG_TAG, "Starting configuration portal");
     
     // Start AP mode

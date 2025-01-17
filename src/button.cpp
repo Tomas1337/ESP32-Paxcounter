@@ -9,7 +9,7 @@ static volatile uint8_t buttonPressCount = 0;
 static volatile uint32_t lastButtonPress = 0;
 
 // Keep only the ISR in IRAM
-void IRAM_ATTR handle_button_press() {
+void handle_button_press() {
     uint32_t now = millis();
     if ((now - lastButtonPress) > 300) {
         lastButtonPress = now;

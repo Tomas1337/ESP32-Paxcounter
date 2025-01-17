@@ -133,7 +133,7 @@ bool sync_time_with_ntp() {
     const int retry_count = 10;
     
     while(timeinfo.tm_year < (2024 - 1900) && ++retry < retry_count) {
-        ESP_LOGI(MAIN_TAG, "Waiting for NTP time... (%d/%d)", retry, retry_count);
+        ESP_LOGD(MAIN_TAG, "Waiting for NTP time... (%d/%d)", retry, retry_count);
         delay(2000);
         time(&now);
         localtime_r(&now, &timeinfo);
@@ -435,10 +435,7 @@ void setup() {
   // start rcommand processing task
   ESP_LOGI(TAG, "Starting rcommand interpreter...");
   rcmd_init();
-
-  // Initialize MQTT handler
   pax_mqtt_init();
-
   // show compiled features
   ESP_LOGI(TAG, "Features:%s", features);
 
