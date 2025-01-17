@@ -1,79 +1,38 @@
 #include "configportal.h"
 #include "wificonfig.h"
 #include "esp_log.h"
-#include <WebServer.h>
+#include <WiFiManager.h>
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
 
 static const char* CONFIG_TAG = "CONFIG_PORTAL";
-static WebServer server(80);
 bool portalActive = false;
 
-// Move the HTML string to flash memory
-static const char CONFIG_HTML[] PROGMEM = R"(
-<!DOCTYPE html>
-<html>
-<head>
-    <title>ESP32 Configuration</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body { font-family: Arial; margin: 20px; }
-        .input-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; }
-        input { width: 100%; padding: 8px; margin-bottom: 10px; }
-        button { background-color: #4CAF50; color: white; padding: 10px 20px; border: none; cursor: pointer; }
-        button:hover { background-color: #45a049; }
-    </style>
-</head>
-<body>
-    <h2>ESP32 Configuration</h2>
-    <form method="POST" action="/save">
-        <div class="input-group">
-            <label for="ssid">WiFi SSID:</label>
-            <input type="text" id="ssid" name="ssid" required>
-        </div>
-        <div class="input-group">
-            <label for="password">WiFi Password:</label>
-            <input type="password" id="password" name="password">
-        </div>
-        <div class="input-group">
-            <label for="mqtt_server">MQTT Server:</label>
-            <input type="text" id="mqtt_server" name="mqtt_server" required>
-        </div>
-        <div class="input-group">
-            <label for="mqtt_port">MQTT Port:</label>
-            <input type="number" id="mqtt_port" name="mqtt_port" value="1883" required>
-        </div>
-        <div class="input-group">
-            <label for="mqtt_topic">MQTT Topic:</label>
-            <input type="text" id="mqtt_topic" name="mqtt_topic" required>
-        </div>
-        <button type="submit">Save Configuration</button>
-    </form>
-</body>
-</html>
-)";
+WiFiManager wifiManager;
 
-void handleRoot() {
-    server.send_P(200, "text/html", CONFIG_HTML);
-}
+// Custom parameters for MQTT configuration
+WiFiManagerParameter custom_mqtt_server("mqtt_server", "MQTT Server", "", 40);
+WiFiManagerParameter custom_mqtt_port("mqtt_port", "MQTT Port", "1883", 6);
+WiFiManagerParameter custom_mqtt_topic("mqtt_topic", "MQTT Topic", "paxcounter", 40);
 
-void handleSave() {
-    String ssid = server.arg("ssid");
-    String password = server.arg("password");
-    String mqtt_server = server.arg("mqtt_server");
-    String mqtt_topic = server.arg("mqtt_topic");
-    int mqtt_port = server.arg("mqtt_port").toInt();
-
+// Callback when configuration is saved
+void saveConfigCallback() {
+    ESP_LOGI(CONFIG_TAG, "Configuration needs to be saved");
+    
+    // Read custom parameters
+    String mqtt_server = custom_mqtt_server.getValue();
+    String mqtt_port = custom_mqtt_port.getValue();
+    String mqtt_topic = custom_mqtt_topic.getValue();
+    
     // Save configuration to file
     File configFile = SPIFFS.open("/config.json", "w");
     if (configFile) {
         StaticJsonDocument<512> doc;
-        doc["wifi_ssid"] = ssid;
-        doc["wifi_password"] = password;
+        doc["wifi_ssid"] = WiFi.SSID();
+        doc["wifi_password"] = WiFi.psk();
         doc["mqtt_server"] = mqtt_server;
         doc["mqtt_topic"] = mqtt_topic;
-        doc["mqtt_port"] = mqtt_port;
+        doc["mqtt_port"] = mqtt_port.toInt();
         
         serializeJson(doc, configFile);
         configFile.close();
@@ -81,10 +40,6 @@ void handleSave() {
     } else {
         ESP_LOGE(CONFIG_TAG, "Failed to open config file for writing");
     }
-
-    server.send(200, "text/plain", "Configuration saved. Device will restart...");
-    delay(1000);
-    ESP.restart();
 }
 
 void startConfigPortal() {
@@ -92,19 +47,49 @@ void startConfigPortal() {
         ESP_LOGW(CONFIG_TAG, "Config portal already active");
         return;
     }
-    libpax_counter_stop();  // This shuts down all promiscuous sniffing
+
+    libpax_counter_stop();  // Stop sniffing during configuration
     ESP_LOGI(CONFIG_TAG, "Starting configuration portal");
     
-    // Start AP mode
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP("ESP32-Config");
+    // Set config save notify callback
+    wifiManager.setSaveConfigCallback(saveConfigCallback);
     
-    // Configure web server
-    server.on("/", HTTP_GET, handleRoot);
-    server.on("/save", HTTP_POST, handleSave);
+    // Add custom parameters
+    wifiManager.addParameter(&custom_mqtt_server);
+    wifiManager.addParameter(&custom_mqtt_port);
+    wifiManager.addParameter(&custom_mqtt_topic);
     
-    server.begin();
+    // Load saved values if they exist
+    if (SPIFFS.exists("/config.json")) {
+        File configFile = SPIFFS.open("/config.json", "r");
+        if (configFile) {
+            StaticJsonDocument<512> doc;
+            DeserializationError error = deserializeJson(doc, configFile);
+            
+            if (!error) {
+                // Set default values for custom parameters
+                custom_mqtt_server.setValue(doc["mqtt_server"].as<const char*>(), 40);
+                custom_mqtt_port.setValue(String(doc["mqtt_port"].as<int>()).c_str(), 6);
+                custom_mqtt_topic.setValue(doc["mqtt_topic"].as<const char*>(), 40);
+            }
+            configFile.close();
+        }
+    }
+    
+    // Set portal timeout (optional, 180 seconds)
+    wifiManager.setConfigPortalTimeout(180);
+    
+    // Set AP name
+    String apName = "ESP32-Pax-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+    
+    // Start config portal
     portalActive = true;
+    if (!wifiManager.startConfigPortal(apName.c_str())) {
+        ESP_LOGI(CONFIG_TAG, "Failed to connect or timeout");
+        delay(3000);
+        ESP.restart();
+    }
     
-    ESP_LOGI(CONFIG_TAG, "Configuration portal started at 192.168.4.1");
+    ESP_LOGI(CONFIG_TAG, "Connected to WiFi");
+    portalActive = false;
 } 
