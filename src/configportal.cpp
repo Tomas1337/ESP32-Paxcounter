@@ -54,11 +54,11 @@ static const char CONFIG_HTML[] PROGMEM = R"(
 </html>
 )";
 
-void IRAM_ATTR handleRoot() {
+void handleRoot() {
     server.send_P(200, "text/html", CONFIG_HTML);
 }
 
-void IRAM_ATTR handleSave() {
+void handleSave() {
     String ssid = server.arg("ssid");
     String password = server.arg("password");
     String mqtt_server = server.arg("mqtt_server");

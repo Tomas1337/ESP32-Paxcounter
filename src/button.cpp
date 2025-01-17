@@ -8,7 +8,7 @@
 static volatile uint8_t buttonPressCount = 0;
 static volatile uint32_t lastButtonPress = 0;
 
-// Minimal ISR in IRAM
+// Keep only the ISR in IRAM
 void IRAM_ATTR handle_button_press() {
     uint32_t now = millis();
     if ((now - lastButtonPress) > 300) {
@@ -17,16 +17,16 @@ void IRAM_ATTR handle_button_press() {
     }
 }
 
-// Move these to flash
-uint8_t __attribute__((noinline)) get_button_press_count() {
+// Regular functions don't need IRAM
+uint8_t get_button_press_count() {
     return buttonPressCount;
 }
 
-void __attribute__((noinline)) reset_button_press_count() {
+void reset_button_press_count() {
     buttonPressCount = 0;
 }
 
-void __attribute__((noinline)) button_init(void) {
+void button_init(void) {
     pinMode(HAS_BUTTON, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(HAS_BUTTON), handle_button_press, FALLING);
 }
