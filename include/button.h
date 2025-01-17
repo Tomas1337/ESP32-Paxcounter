@@ -3,15 +3,10 @@
 
 #include "globals.h"
 
-#ifndef BUTTON_ACTIVEHIGH
-#define BUTTON_ACTIVEHIGH 0
-#endif
-
-#ifndef BUTTON_PULLUP
-#define BUTTON_PULLUP 1
-#endif
-
+// Function declarations
 void button_init(void);
 void handle_button_press(void);
+uint8_t get_button_press_count(void);
+void reset_button_press_count(void);
 
-#endif
+#endif // _BUTTON_H

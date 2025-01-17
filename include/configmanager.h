@@ -2,14 +2,12 @@
 #define _CONFIGMANAGER_H
 
 #include "globals.h"
-#include "reset.h"
-#include <Preferences.h>
+#include <SPIFFS.h>
 
-extern configData_t cfg;
+// Function declarations
+void saveConfiguration(void);
+void loadConfiguration(void);
+void eraseConfiguration(void);
+void initialize_config(void);
 
-void saveConfig(bool erase);
-void loadConfig(void);
-void eraseConfig(void);
-int version_compare(const String v1, const String v2);
-
-#endif
+#endif // _CONFIGMANAGER_H
