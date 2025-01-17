@@ -1,17 +1,11 @@
 #ifndef _BUTTON_H
 #define _BUTTON_H
 
-#include "globals.h"
-
-#ifndef BUTTON_ACTIVEHIGH
-#define BUTTON_ACTIVEHIGH 0
+#ifdef HAS_BUTTON
+    void button_init(void);
+    void handle_button_press(void);
+    uint8_t get_button_press_count(void);
+    void reset_button_press_count(void);
 #endif
-
-#ifndef BUTTON_PULLUP
-#define BUTTON_PULLUP 1
-#endif
-
-void button_init(void);
-void handle_button_press(void);
 
 #endif

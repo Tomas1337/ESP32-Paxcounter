@@ -78,6 +78,7 @@ BME_IRQ         <- setBMEIRQ() <- Ticker.h
 
 // Basic Config
 #include "main.h"
+#include "globals.h"
 #include "configportal.h"
 #include "mqtthandler.h"
 #include "wificonfig.h"
@@ -175,8 +176,10 @@ void setup() {
     strcat_P(features, " BTN");
   #endif
 
-  // Initialize configuration portal
-  init_config_portal();
+  // Initialize SPIFFS for configuration storage
+  if (!SPIFFS.begin(true)) {
+      ESP_LOGE(TAG, "Failed to mount SPIFFS");
+  }
   
   // hash 6 byte device MAC to 4 byte clientID
   uint8_t mac[6];
@@ -186,25 +189,23 @@ void setup() {
   snprintf(clientId, 20, "paxcounter_%08x", hashedmac);
 
   // Load saved WiFi configuration if available
-  if (SPIFFS.begin(true)) {
-    if (SPIFFS.exists("/config.json")) {
-      File configFile = SPIFFS.open("/config.json", "r");
-      if (configFile) {
-        StaticJsonDocument<512> doc;
-        DeserializationError error = deserializeJson(doc, configFile);
+  if (SPIFFS.exists("/config.json")) {
+    File configFile = SPIFFS.open("/config.json", "r");
+    if (configFile) {
+      StaticJsonDocument<512> doc;
+      DeserializationError error = deserializeJson(doc, configFile);
+      
+      if (!error) {
+        // Store configuration in our structure
+        wifiConfig.ssid = doc["wifi_ssid"].as<String>();
+        wifiConfig.password = doc["wifi_password"].as<String>();
+        wifiConfig.mqtt_server = doc["mqtt_server"].as<String>();
+        wifiConfig.mqtt_topic = doc["mqtt_topic"].as<String>();
+        wifiConfig.mqtt_port = doc["mqtt_port"].as<int>();
         
-        if (!error) {
-          // Store configuration in our structure
-          wifiConfig.ssid = doc["wifi_ssid"].as<String>();
-          wifiConfig.password = doc["wifi_password"].as<String>();
-          wifiConfig.mqtt_server = doc["mqtt_server"].as<String>();
-          wifiConfig.mqtt_topic = doc["mqtt_topic"].as<String>();
-          wifiConfig.mqtt_port = doc["mqtt_port"].as<int>();
-          
-          ESP_LOGI(TAG, "Loaded saved configuration");
-        }
-        configFile.close();
+        ESP_LOGI(TAG, "Loaded saved configuration");
       }
+      configFile.close();
     }
   }
 
@@ -475,18 +476,11 @@ void setup() {
 } // setup()
 
 void loop() {
-    if (is_config_portal_active()) {
-        ESP_LOGI(TAG, "Config portal is active, starting portal...");
-        start_config_portal();
-        while (is_config_portal_active()) {
-            handle_config_portal();
-            delay(10);
-        }
-        ESP_LOGI(TAG, "Config portal closed");
-    }
-    
-    // Handle MQTT operations
-    pax_mqtt_loop();
-    
-    vTaskDelete(NULL);
+  // Handle button presses and MQTT operations
+  pax_mqtt_loop();
+
+  // Give other tasks time to run
+  vTaskDelay(pdMS_TO_TICKS(10));
+
+  vTaskDelete(NULL);
 }
