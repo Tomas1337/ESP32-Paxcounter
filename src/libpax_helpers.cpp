@@ -3,6 +3,7 @@
 #include "esp_wifi.h"
 #include "esp_bt.h"
 #include "esp_gap_ble_api.h"
+#include "libpax_api.h"
 
 static const char* PAX_TAG = "PAX_HELPER";
 
@@ -54,10 +55,15 @@ void init_libpax(void) {
     
     // Initialize libpax with our callback
     int result = libpax_counter_init(pax_counter_callback, &count_from_libpax, cfg.sendcycle * 2,
-                      cfg.countermode);
-                      
+                    cfg.countermode);
+                    
     if (result == 0) {
         ESP_LOGI(PAX_TAG, "Starting libpax counter...");
+        
+        // Register device callback for MQTT
+        libpax_register_device_callback([](uint8_t *mac, int8_t rssi, bool is_wifi) {
+            pax_mqtt_enqueue_device(mac, rssi, is_wifi);
+        });
         
         // Set up WiFi sniffer if enabled
         if (cfg.wifiscan) {

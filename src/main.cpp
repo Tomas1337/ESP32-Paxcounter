@@ -209,6 +209,22 @@ void setup() {
     }
   }
 
+  // // Initialize MQTT handler before libpax to ensure queues exist
+  // ESP_LOGI(TAG, "Initializing MQTT handler...");
+  // pax_mqtt_init();
+
+  // // Initialize libpax after MQTT is ready
+  // ESP_LOGI(TAG, "Starting libpax...");
+  // ESP_LOGI(TAG, "WIFISCAN: %s", cfg.wifiscan ? "on" : "off");
+  // ESP_LOGI(TAG, "BLESCAN: %s", cfg.blescan ? "on" : "off");
+  // init_libpax();
+
+  // // show compiled features
+  // ESP_LOGI(TAG, "Features:%s", features);
+
+  // // set runmode to normal
+  // RTC_runmode = RUNMODE_NORMAL;
+
   // Reduce power consumption (optional)
   // This reduces the power consumption with about 50 mWatt.
   // Typically a TTGO T-beam v1.0 uses 660 mWatt when the CPU frequency is set to 80 MHz.
@@ -429,13 +445,14 @@ void setup() {
   if (config_update != 0) {
     ESP_LOGE(TAG, "Error in libpax configuration.");
   } else {
+    pax_mqtt_init();
     init_libpax();
   }
 
   // start rcommand processing task
   ESP_LOGI(TAG, "Starting rcommand interpreter...");
   rcmd_init();
-  pax_mqtt_init();
+  
   // show compiled features
   ESP_LOGI(TAG, "Features:%s", features);
 

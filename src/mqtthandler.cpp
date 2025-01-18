@@ -61,7 +61,7 @@ void pax_mqtt_enqueue_device(const uint8_t* mac, int8_t rssi, bool is_wifi) {
     msg.timestamp = millis();
 
     if (xQueueSend(deviceQueue, &msg, 0) != pdTRUE) {
-        ESP_LOGW(MQTT_TAG, "Device queue full, dropping packet");
+        ESP_LOGD(MQTT_TAG, "Device queue full, dropping packet");
     } else {
         ESP_LOGD(MQTT_TAG, "Device queued: Type=%s", is_wifi ? "WiFi" : "BLE");
     }
@@ -90,7 +90,7 @@ bool pax_mqtt_connect() {
     }
     
     if (!mqttClient.connected()) {
-        ESP_LOGI(MQTT_TAG, "Connecting to MQTT broker...");
+        ESP_LOGD(MQTT_TAG, "Connecting to MQTT broker...");
         mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
         mqttClient.setKeepAlive(MQTT_KEEPALIVE);
         
