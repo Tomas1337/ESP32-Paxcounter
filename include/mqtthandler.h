@@ -16,12 +16,12 @@ struct ProbeData {
 };
 
 // Structure for device detection data
-struct DeviceData {
-    uint8_t mac[6];
-    int8_t rssi;
-    bool is_wifi;  // true for WiFi, false for BLE
-    uint32_t timestamp;
-};
+// struct DeviceData {
+//     uint8_t mac[6];
+//     int8_t rssi;
+//     bool is_wifi;  // true for WiFi, false for BLE
+//     uint32_t timestamp;
+// };
 
 
 // Function declarations
@@ -31,9 +31,9 @@ void pax_mqtt_enqueue(uint16_t pax, uint16_t wifi_count, uint16_t ble_count);
 void pax_mqtt_enqueue_device(const uint8_t* mac, int8_t rssi, bool is_wifi);
 void pax_mqtt_send_data();
 void pax_mqtt_send_devices();
-bool pax_mqtt_connect();
 // void pax_mqtt_disconnect(void);
 
 extern volatile bool shouldSendMQTT;
+extern TaskHandle_t paxMqttTaskHandle;
 
 #endif

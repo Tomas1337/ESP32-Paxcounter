@@ -4,7 +4,7 @@
 
 void setSendIRQ(void) { 
   ESP_LOGI(TAG, "Setting send IRQ");  
-  xTaskNotify(irqHandlerTask, SENDCYCLE_IRQ, eSetBits); 
+  xTaskNotify(paxMqttTaskHandle, SENDCYCLE_IRQ, eSetBits); 
   }
 
 // put data to send in RTos Queues used for transmit over channels Lora and SPI
@@ -71,7 +71,7 @@ void sendData() {
       count.wifi_count, count.ble_count);
 
   // Enqueue data for MQTT - this will trigger the MQTT task to send
-  pax_mqtt_enqueue(count.pax, count.wifi_count, count.ble_count);
+  // pax_mqtt_enqueue(count.pax, count.wifi_count, count.ble_count);
 
   while (bitmask) {
     switch (bitmask & mask) {
