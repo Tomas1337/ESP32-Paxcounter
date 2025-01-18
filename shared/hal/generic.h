@@ -10,7 +10,7 @@
 // Hardware related definitions for generic ESP32 boards
 // generic.h is kitchensink with all available options
 
-#define HAS_LORA 1 // comment out if device shall not send data via LoRa or has no LoRa
+// #define HAS_LORA 1 // comment out if device shall not send data via LoRa or has no LoRa
 //#define HAS_SPI 1  // comment out if device shall not send data via SPI
 // pin definitions for SPI slave interface
 //#define SPI_MOSI GPIO_NUM_23
@@ -19,7 +19,7 @@
 //#define SPI_CS   GPIO_NUM_5
 
 // enable only if you want to store a local paxcount table on the device
-#define HAS_SDCARD  1      // this board has an SD-card-reader/writer
+// #define HAS_SDCARD  1      // this board has an SD-card-reader/writer
 // Pins for SD-card
 #define SDCARD_CS    (13)
 #define SDCARD_MOSI  (15)
@@ -65,7 +65,7 @@
 //#define HAS_SENSOR_2 1 // comment out if device has user defined sensor #2
 //#define HAS_SENSOR_3 1 // comment out if device has user defined sensor #3
 
-#define CFG_sx1276_radio 1 // select LoRa chip
+// #define CFG_sx1276_radio 1 // select LoRa chip
 //#define CFG_sx1272_radio 1 // select LoRa chip
 //#define BOARD_HAS_PSRAM // use if board has external SPIRAM, note: this will reduce IRAM0 by 64KB for SPIRAM cache
 #define DISABLE_BROWNOUT 1 // comment out if you want to keep brownout feature
@@ -78,7 +78,9 @@
 #ifndef HAS_LED
 #define HAS_LED NOT_A_PIN  // Define as NOT_A_PIN if no LED is present
 #endif
-#define HAS_BUTTON (39) // on board button
+#define HAS_BUTTON (2) 
+#define BUTTON_PULLUP 1  // Enable pullup for boot button
+#define BUTTON_ACTIVEHIGH 0  // Button is active low
 //#define RGB_LED_COUNT 1 // we have 1 LED
 //#define HAS_RGB_LED FastLED.addLeds<WS2812, GPIO_NUM_0, GRB>(leds, RGB_LED_COUNT);
 

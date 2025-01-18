@@ -17,8 +17,8 @@ void pax_counter_callback() {
         // Update MQTT counts
         pax_mqtt_enqueue(current_count.pax, current_count.wifi_count, current_count.ble_count);
         
-        // Call the original callback for system functionality
-        setSendIRQ();
+        // Call the original callback for systequeuem functionality
+        // setSendIRQ();
     }
 }
 

@@ -78,8 +78,12 @@ BME_IRQ         <- setBMEIRQ() <- Ticker.h
 
 // Basic Config
 #include "main.h"
+#include "globals.h"
+#include "configportal.h"
 #include "mqtthandler.h"
-#include <time.h>
+#include "wificonfig.h"
+#include <SPIFFS.h>
+#include <ArduinoJson.h>
 
 // NTP Server settings
 #define NTP_SERVER "time.google.com"
@@ -103,7 +107,7 @@ void print_current_time() {
 bool sync_time_with_ntp() {
     ESP_LOGI(MAIN_TAG, "Connecting to WiFi for time sync...");
     WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    WiFi.begin(wifiConfig.ssid.c_str(), wifiConfig.password.c_str());
     
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
@@ -129,7 +133,7 @@ bool sync_time_with_ntp() {
     const int retry_count = 10;
     
     while(timeinfo.tm_year < (2024 - 1900) && ++retry < retry_count) {
-        ESP_LOGI(MAIN_TAG, "Waiting for NTP time... (%d/%d)", retry, retry_count);
+        ESP_LOGD(MAIN_TAG, "Waiting for NTP time... (%d/%d)", retry, retry_count);
         delay(2000);
         time(&now);
         localtime_r(&now, &timeinfo);
@@ -168,6 +172,42 @@ char clientId[20] = {0}; // unique ClientID
 
 void setup() {
   char features[100] = "";
+  #ifdef HAS_BUTTON
+    strcat_P(features, " BTN");
+  #endif
+
+  // Initialize SPIFFS for configuration storage
+  if (!SPIFFS.begin(true)) {
+      ESP_LOGE(TAG, "Failed to mount SPIFFS");
+  }
+  
+  // hash 6 byte device MAC to 4 byte clientID
+  uint8_t mac[6];
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+
+  const uint32_t hashedmac = myhash((const char *)mac, 6);
+  snprintf(clientId, 20, "paxcounter_%08x", hashedmac);
+
+  // Load saved WiFi configuration if available
+  if (SPIFFS.exists("/config.json")) {
+    File configFile = SPIFFS.open("/config.json", "r");
+    if (configFile) {
+      StaticJsonDocument<512> doc;
+      DeserializationError error = deserializeJson(doc, configFile);
+      
+      if (!error) {
+        // Store configuration in our structure
+        wifiConfig.ssid = doc["wifi_ssid"].as<String>();
+        wifiConfig.password = doc["wifi_password"].as<String>();
+        wifiConfig.mqtt_server = doc["mqtt_server"].as<String>();
+        wifiConfig.mqtt_topic = doc["mqtt_topic"].as<String>();
+        wifiConfig.mqtt_port = doc["mqtt_port"].as<int>();
+        
+        ESP_LOGI(TAG, "Loaded saved configuration");
+      }
+      configFile.close();
+    }
+  }
 
   // Reduce power consumption (optional)
   // This reduces the power consumption with about 50 mWatt.
@@ -182,13 +222,6 @@ void setup() {
   // register with brownout is at address DR_REG_RTCCNTL_BASE + 0xd4
   (*((uint32_t volatile *)ETS_UNCACHED_ADDR((DR_REG_RTCCNTL_BASE + 0xd4)))) = 0;
 #endif
-
-  // hash 6 byte device MAC to 4 byte clientID
-  uint8_t mac[6];
-  esp_read_mac(mac, ESP_MAC_WIFI_STA);
-
-  const uint32_t hashedmac = myhash((const char *)mac, 6);
-  snprintf(clientId, 20, "paxcounter_%08x", hashedmac);
 
   // setup debug output or silence device
 #if (VERBOSE)
@@ -402,17 +435,17 @@ void setup() {
   // start rcommand processing task
   ESP_LOGI(TAG, "Starting rcommand interpreter...");
   rcmd_init();
-
-  // cyclic function interrupts
-  ESP_LOGI(TAG, "Attaching cyclic timer...");
-  cyclicTimer.attach(HOMECYCLE, setCyclicIRQ);
-  ESP_LOGI(TAG, "Cyclic timer attached");
-
+  pax_mqtt_init();
   // show compiled features
   ESP_LOGI(TAG, "Features:%s", features);
 
   // set runmode to normal
   RTC_runmode = RUNMODE_NORMAL;
+
+  // Initialize button controller before IRQ handler
+  ESP_LOGI(TAG, "Starting Button Controller...");
+  button_init();
+  ESP_LOGI(TAG, "Button Controller started");
 
   // start state machine
   ESP_LOGI(TAG, "Starting Interrupt Handler...");
@@ -436,15 +469,15 @@ void setup() {
       ESP_LOGE(MAIN_TAG, "Time sync failed");
   }
 
-  // Initialize MQTT handler
-  pax_mqtt_init();
-
   vTaskDelete(NULL);
 } // setup()
 
 void loop() {
-  // Handle MQTT operations
+  // Handle button presses and MQTT operations
   pax_mqtt_loop();
-  
+
+  // Give other tasks time to run
+  vTaskDelay(pdMS_TO_TICKS(10));
+
   vTaskDelete(NULL);
 }

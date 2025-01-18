@@ -11,6 +11,11 @@ void setCyclicIRQ() { xTaskNotify(irqHandlerTask, CYCLIC_IRQ, eSetBits); }
 
 // do all housekeeping
 void doHousekeeping() {
+  static unsigned long last_run = 0;
+  unsigned long now = millis();
+  ESP_LOGD(TAG, "Cyclic task running (interval: %dms)", now - last_run);
+  last_run = now;
+
   // check if update or maintenance mode trigger switch was set by rcommand
   if ((RTC_runmode == RUNMODE_UPDATE) || (RTC_runmode == RUNMODE_MAINTENANCE))
     do_reset(true); // warmstart
@@ -67,13 +72,6 @@ void doHousekeeping() {
     ESP_LOGD(TAG, "LEDloop %d bytes left | Taskstate = %d",
              uxTaskGetStackHighWaterMark(ledLoopTask),
              eTaskGetState(ledLoopTask));
-#endif
-
-#ifdef HAS_BUTTON
-  if (buttonLoopTask != NULL)
-    ESP_LOGD(TAG, "Buttonloop %d bytes left | Taskstate = %d",
-             uxTaskGetStackHighWaterMark(buttonLoopTask),
-             eTaskGetState(buttonLoopTask));
 #endif
 
 // read battery voltage into global variable
