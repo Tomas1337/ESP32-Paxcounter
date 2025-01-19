@@ -11,9 +11,18 @@ static volatile uint32_t lastButtonPress = 0;
 // Keep only the ISR in IRAM
 void handle_button_press() {
     uint32_t now = millis();
+    ESP_LOGI("BUTTON", "Button pressed");
     if ((now - lastButtonPress) > 300) {
         lastButtonPress = now;
         buttonPressCount++;
+        
+        // Check if we've reached 5 presses within the time window
+        if (buttonPressCount == 5) {
+            // We can't call the portal directly from ISR, so we'll set a flag
+            // that will be checked in the main loop
+            RTC_runmode = RUNMODE_MAINTENANCE;
+            buttonPressCount = 0;  // Reset the count
+        }
     }
 }
 
@@ -23,7 +32,11 @@ uint8_t get_button_press_count() {
 }
 
 void reset_button_press_count() {
-    buttonPressCount = 0;
+    // Reset count after a timeout period
+    uint32_t now = millis();
+    if ((now - lastButtonPress) > 5000) { // 5 second timeout
+        buttonPressCount = 0;
+    }
 }
 
 void button_init(void) {

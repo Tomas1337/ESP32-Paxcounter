@@ -84,6 +84,7 @@ BME_IRQ         <- setBMEIRQ() <- Ticker.h
 #include "wificonfig.h"
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
+#include "button.h"
 
 // NTP Server settings
 #define NTP_SERVER "time.google.com"
@@ -469,8 +470,17 @@ void loop() {
   // Handle button presses and MQTT operations
   pax_mqtt_loop();
 
+  // Check if we need to enter maintenance mode (config portal)
+  if (RTC_runmode == RUNMODE_MAINTENANCE) {
+    ESP_LOGI(TAG, "Entering maintenance mode (config portal)");
+    start_boot_menu();
+    // Reset run mode after portal is closed
+    RTC_runmode = RUNMODE_NORMAL;
+  }
+
+  // Reset button press count periodically
+  reset_button_press_count();
+
   // Give other tasks time to run
   vTaskDelay(pdMS_TO_TICKS(10));
-
-  vTaskDelete(NULL);
 }

@@ -43,8 +43,8 @@ static PubSubClient mqttClient(wifiClient);
 static StaticJsonDocument<200> jsonDoc;
 static char jsonBuffer[200];
 
-#define COUNT_QUEUE_SIZE 20
-#define DEVICE_QUEUE_SIZE 50
+#define COUNT_QUEUE_SIZE 50
+#define DEVICE_QUEUE_SIZE 70
 
 
 
@@ -61,7 +61,10 @@ void pax_mqtt_enqueue_device(const uint8_t* mac, int8_t rssi, bool is_wifi) {
     msg.timestamp = millis();
 
     if (xQueueSend(deviceQueue, &msg, 0) != pdTRUE) {
-        ESP_LOGD(MQTT_TAG, "Device queue full, dropping packet");
+        ESP_LOGD(MQTT_TAG, "Device queue full, dropping packet and triggering send task");
+        if (paxMqttTaskHandle) {
+            xTaskNotify(paxMqttTaskHandle, SENDCYCLE_IRQ, eSetBits);
+        }
     } else {
         ESP_LOGD(MQTT_TAG, "Device queued: Type=%s", is_wifi ? "WiFi" : "BLE");
     }
