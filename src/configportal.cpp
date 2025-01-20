@@ -43,11 +43,7 @@ void saveConfigCallback() {
 }
 
 void startConfigPortal() {
-    if (portalActive) {
-        ESP_LOGW(CONFIG_TAG, "Config portal already active");
-        return;
-    }
-
+    portalActive = true;
     libpax_counter_stop();  // Stop sniffing during configuration
     ESP_LOGI(CONFIG_TAG, "Starting configuration portal");
     
@@ -74,6 +70,8 @@ void startConfigPortal() {
             }
             configFile.close();
         }
+    } else {
+        ESP_LOGD(CONFIG_TAG, "No saved configuration found");
     }
     
     // Set portal timeout (optional, 180 seconds)

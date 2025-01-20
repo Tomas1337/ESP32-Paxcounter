@@ -49,4 +49,8 @@ struct WiFiConfig {
 
 extern WiFiConfig wifiConfig;
 
+// Function declarations
+bool loadWiFiConfig();
+bool saveWiFiConfig();
+
 #endif 

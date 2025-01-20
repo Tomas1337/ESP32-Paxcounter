@@ -1,6 +1,7 @@
 // Basic Config
 #include "globals.h"
 #include "rcommand.h"
+#include "wificonfig.h"
 
 static QueueHandle_t RcmdQueue;
 TaskHandle_t rcmdTask;
@@ -398,11 +399,23 @@ void set_flush(uint8_t val[]) {
 void set_loadconfig(uint8_t val[]) {
   ESP_LOGI(TAG, "Remote command: load config from NVRAM");
   loadConfig();
+  // Also load WiFi configuration
+  if (loadWiFiConfig()) {
+    ESP_LOGI(TAG, "WiFi configuration loaded successfully");
+  } else {
+    ESP_LOGI(TAG, "Failed to load WiFi configuration, using defaults");
+  }
 }
 
 void set_saveconfig(uint8_t val[]) {
   ESP_LOGI(TAG, "Remote command: save config to NVRAM");
   saveConfig(false);
+  // Also save WiFi configuration
+  if (saveWiFiConfig()) {
+    ESP_LOGI(TAG, "WiFi configuration saved successfully");
+  } else {
+    ESP_LOGW(TAG, "Failed to save WiFi configuration");
+  }
 }
 
 // assign previously defined functions to set of numeric remote commands

@@ -120,7 +120,7 @@ void send_queued_messages() {
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
         vTaskDelay(pdMS_TO_TICKS(500));
-        ESP_LOGI(MQTT_TAG, "Attempting to connect to WiFi... (%d)", attempts + 1);
+        ESP_LOGD(MQTT_TAG, "Attempting to connect to WiFi... (%d)", attempts + 1);
         attempts++;
     }
     
@@ -174,7 +174,7 @@ void send_queued_messages() {
                 char buffer[256];
                 serializeJson(doc, buffer);
                 
-                if (mqttClient.publish(MQTT_DEVICE_TOPIC, buffer)) {
+                if (mqttClient.publish(wifiConfig.mqtt_topic.c_str(), buffer)) {
                     ESP_LOGD(MQTT_TAG, "Successfully sent device data");
                 } else {
                     ESP_LOGE(MQTT_TAG, "Failed to send device data");
@@ -187,9 +187,20 @@ void send_queued_messages() {
             mqttClient.disconnect();
         }
         
-        ESP_LOGI(MQTT_TAG, "Disconnecting WiFi...");
-        WiFi.disconnect(true);
-        WiFi.mode(WIFI_OFF);
+        // Now check if user triggered config portal (maintenance)
+        if (RTC_runmode != RUNMODE_MAINTENANCE) {
+            // If still normal or sending, we can safely shut down WiFi
+            ESP_LOGI(MQTT_TAG, "Disconnecting WiFi and returning to sniffing...");
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_OFF);
+
+            // Optionally re-enable your promiscuous sniffing here
+            // e.g. libpax_counter_start() or however your code does it
+            RTC_runmode = RUNMODE_NORMAL;
+        } else {
+            ESP_LOGW(MQTT_TAG, "Maintenance mode triggered, skipping WiFi shutdown here.");
+        }
+        
     } else {
         ESP_LOGE(MQTT_TAG, "Failed to connect to WiFi");
     }
@@ -200,7 +211,14 @@ static void mqtt_task(void* parameter) {
     uint32_t ulNotificationValue;
     const TickType_t xMaxBlockTime = pdMS_TO_TICKS(60000); // 60 second timeout
 
-    for(;;) {
+    for (;;) {
+        // Check for maintenance mode
+        if (RTC_runmode == RUNMODE_MAINTENANCE) {
+            ESP_LOGI(MQTT_TAG, "Entering maintenance mode (config portal)");
+            startConfigPortal(); // Start the configuration portal
+            continue; // Skip the rest of the loop
+        }
+
         // Wait for notification from setSendIRQ
         if (xTaskNotifyWait(0x00, ULONG_MAX, &ulNotificationValue, xMaxBlockTime) == pdTRUE) {
             if (ulNotificationValue & SENDCYCLE_IRQ) {
@@ -227,7 +245,7 @@ void pax_mqtt_init() {
     BaseType_t result = xTaskCreatePinnedToCore(
         mqtt_task,          // Task function
         "mqtt_task",        // Task name
-        4096,              // Stack size (bytes)
+        8192,              // Stack size (bytes)
         NULL,              // Parameter to pass
         1,                 // Task priority
         &paxMqttTaskHandle,// Task handle

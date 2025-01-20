@@ -90,7 +90,7 @@ BME_IRQ         <- setBMEIRQ() <- Ticker.h
 #define NTP_SERVER "time.google.com"
 #define GMT_OFFSET_SEC 3600      // GMT+1 for CET
 #define DAYLIGHT_OFFSET_SEC 3600 // +1 hour for summer time
-
+#define HAS_BUTTON 0
 static const char* MAIN_TAG = "MAIN";
 
 // Function to print current time in human readable format
@@ -113,7 +113,7 @@ bool sync_time_with_ntp() {
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
         vTaskDelay(pdMS_TO_TICKS(500));
-        ESP_LOGI(MAIN_TAG, "Attempting to connect to WiFi... (%d/20)", attempts + 1);
+        ESP_LOGD(MAIN_TAG, "Attempting to connect to WiFi... (%d/20)", attempts + 1);
         attempts++;
     }
     
@@ -189,27 +189,6 @@ void setup() {
   const uint32_t hashedmac = myhash((const char *)mac, 6);
   snprintf(clientId, 20, "paxcounter_%08x", hashedmac);
 
-  // Load saved WiFi configuration if available
-  if (SPIFFS.exists("/config.json")) {
-    File configFile = SPIFFS.open("/config.json", "r");
-    if (configFile) {
-      StaticJsonDocument<512> doc;
-      DeserializationError error = deserializeJson(doc, configFile);
-      
-      if (!error) {
-        // Store configuration in our structure
-        wifiConfig.ssid = doc["wifi_ssid"].as<String>();
-        wifiConfig.password = doc["wifi_password"].as<String>();
-        wifiConfig.mqtt_server = doc["mqtt_server"].as<String>();
-        wifiConfig.mqtt_topic = doc["mqtt_topic"].as<String>();
-        wifiConfig.mqtt_port = doc["mqtt_port"].as<int>();
-        
-        ESP_LOGI(TAG, "Loaded saved configuration");
-      }
-      configFile.close();
-    }
-  }
-
   // disable brownout detection
 #ifdef DISABLE_BROWNOUT
   // register with brownout is at address DR_REG_RTCCNTL_BASE + 0xd4
@@ -235,7 +214,7 @@ void setup() {
   do_after_reset();
 
   ESP_LOGI(TAG, "Starting %s v%s (runmode=%d / restarts=%d)", clientId,
-           PROGVERSION, RTC_runmode, RTC_restarts);
+          PROGVERSION, RTC_runmode, RTC_restarts);
   ESP_LOGI(TAG, "code build date: %d", compileTime());
 
   // print chip information on startup if in verbose mode after coldstart
@@ -395,9 +374,6 @@ void setup() {
   strcat_P(features, " IF482");
 #endif
 
-  // start local webserver on rcommand request
-  if (RTC_runmode == RUNMODE_MAINTENANCE)
-    start_boot_menu();
 
   // start libpax lib (includes timer to trigger cyclic senddata)
   ESP_LOGI(TAG, "Starting libpax...");
@@ -464,23 +440,9 @@ void setup() {
   }
 
   vTaskDelete(NULL);
-} // setup()
+}
 
 void loop() {
-  // Handle button presses and MQTT operations
-  pax_mqtt_loop();
-
-  // Check if we need to enter maintenance mode (config portal)
-  if (RTC_runmode == RUNMODE_MAINTENANCE) {
-    ESP_LOGI(TAG, "Entering maintenance mode (config portal)");
-    start_boot_menu();
-    // Reset run mode after portal is closed
-    RTC_runmode = RUNMODE_NORMAL;
-  }
-
-  // Reset button press count periodically
-  reset_button_press_count();
-
   // Give other tasks time to run
   vTaskDelay(pdMS_TO_TICKS(10));
 }

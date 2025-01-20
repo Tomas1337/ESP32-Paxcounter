@@ -15,15 +15,6 @@ struct ProbeData {
     uint32_t timestamp;
 };
 
-// Structure for device detection data
-// struct DeviceData {
-//     uint8_t mac[6];
-//     int8_t rssi;
-//     bool is_wifi;  // true for WiFi, false for BLE
-//     uint32_t timestamp;
-// };
-
-
 // Function declarations
 void pax_mqtt_init(void);
 void pax_mqtt_loop(void);
