@@ -54,7 +54,7 @@ void init_libpax(void) {
     ESP_LOGI(PAX_TAG, "Initializing libpax with callback...");
     
     // Initialize libpax with our callback
-    int result = libpax_counter_init(pax_counter_callback, &count_from_libpax, cfg.sendcycle * 2,
+    int result = libpax_counter_init(pax_counter_callback, &count_from_libpax, cfg.sendcycle,
                     cfg.countermode);
                     
     if (result == 0) {
