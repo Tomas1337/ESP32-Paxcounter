@@ -43,8 +43,8 @@ static PubSubClient mqttClient(wifiClient);
 static StaticJsonDocument<200> jsonDoc;
 static char jsonBuffer[200];
 
-#define COUNT_QUEUE_SIZE 50
-#define DEVICE_QUEUE_SIZE 70
+#define COUNT_QUEUE_SIZE 30
+#define DEVICE_QUEUE_SIZE 100
 
 
 
@@ -58,7 +58,9 @@ void pax_mqtt_enqueue_device(const uint8_t* mac, int8_t rssi, bool is_wifi) {
     memcpy(msg.mac, mac, 6);
     msg.rssi = rssi;
     msg.is_wifi = is_wifi;
-    msg.timestamp = millis();
+    time_t now;
+    time(&now); // Get the current time from the RTC/NTP
+    msg.timestamp = now;
 
     if (xQueueSend(deviceQueue, &msg, 0) != pdTRUE) {
         ESP_LOGD(MQTT_TAG, "Device queue full, dropping packet and triggering send task");
@@ -71,11 +73,13 @@ void pax_mqtt_enqueue_device(const uint8_t* mac, int8_t rssi, bool is_wifi) {
 }
 
 void pax_mqtt_enqueue(uint16_t pax_count, uint16_t wifi_count, uint16_t ble_count) {
+    time_t now;
+    time(&now); // Get the current time from the RTC/NTP
     CountMessage msg = {
         .pax = pax_count,
         .wifi_count = wifi_count,
         .ble_count = ble_count,
-        .timestamp = millis()
+        .timestamp = now
     };
     
     if (xQueueSend(countQueue, &msg, 0) != pdTRUE) {
@@ -136,9 +140,7 @@ void send_queued_messages() {
                 data["pax"] = count_msg.pax;
                 data["wifi"] = count_msg.wifi_count;
                 data["ble"] = count_msg.ble_count;
-                time_t now;
-                time(&now);
-                data["timestamp"] = now;
+                data["timestamp"] = count_msg.timestamp;
                 
                 char buffer[256];
                 serializeJson(doc, buffer);
@@ -167,9 +169,7 @@ void send_queued_messages() {
                 device["mac"] = mac;
                 device["rssi"] = device_msg.rssi;
                 device["type"] = device_msg.is_wifi ? "wifi" : "ble";
-                time_t now;
-                time(&now);
-                device["timestamp"] = now;
+                device["timestamp"] = device_msg.timestamp;
                 
                 char buffer[256];
                 serializeJson(doc, buffer);
