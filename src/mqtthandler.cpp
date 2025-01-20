@@ -174,7 +174,7 @@ void send_queued_messages() {
                 char buffer[256];
                 serializeJson(doc, buffer);
                 
-                if (mqttClient.publish(wifiConfig.mqtt_topic.c_str(), buffer)) {
+                if (mqttClient.publish((wifiConfig.mqtt_topic + "/devices").c_str(), buffer)) {
                     ESP_LOGD(MQTT_TAG, "Successfully sent device data");
                 } else {
                     ESP_LOGE(MQTT_TAG, "Failed to send device data");
@@ -222,7 +222,7 @@ static void mqtt_task(void* parameter) {
         // Wait for notification from setSendIRQ
         if (xTaskNotifyWait(0x00, ULONG_MAX, &ulNotificationValue, xMaxBlockTime) == pdTRUE) {
             if (ulNotificationValue & SENDCYCLE_IRQ) {
-                ESP_LOGI(MQTT_TAG, "Send IRQ received, processing queued messages");
+                ESP_LOGD(MQTT_TAG, "Send IRQ received, processing queued messages");
                 send_queued_messages();
             }
         }

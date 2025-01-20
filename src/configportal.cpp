@@ -24,21 +24,18 @@ void saveConfigCallback() {
     String mqtt_port = custom_mqtt_port.getValue();
     String mqtt_topic = custom_mqtt_topic.getValue();
     
-    // Save configuration to file
-    File configFile = SPIFFS.open("/config.json", "w");
-    if (configFile) {
-        StaticJsonDocument<512> doc;
-        doc["wifi_ssid"] = WiFi.SSID();
-        doc["wifi_password"] = WiFi.psk();
-        doc["mqtt_server"] = mqtt_server;
-        doc["mqtt_topic"] = mqtt_topic;
-        doc["mqtt_port"] = mqtt_port.toInt();
-        
-        serializeJson(doc, configFile);
-        configFile.close();
+    // Update wifiConfig structure with new values
+    wifiConfig.ssid = WiFi.SSID();
+    wifiConfig.password = WiFi.psk();
+    wifiConfig.mqtt_server = mqtt_server;
+    wifiConfig.mqtt_topic = mqtt_topic;
+    wifiConfig.mqtt_port = mqtt_port.toInt();
+    
+    // Save configuration using our saveWiFiConfig function
+    if (saveWiFiConfig()) {
         ESP_LOGI(CONFIG_TAG, "Configuration saved successfully");
     } else {
-        ESP_LOGE(CONFIG_TAG, "Failed to open config file for writing");
+        ESP_LOGE(CONFIG_TAG, "Failed to save configuration");
     }
 }
 
