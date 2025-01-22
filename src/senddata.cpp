@@ -3,7 +3,6 @@
 #include "mqtthandler.h"
 
 void setSendIRQ(void) { 
-  ESP_LOGI(TAG, "Setting send IRQ");  
   xTaskNotify(paxMqttTaskHandle, SENDCYCLE_IRQ, eSetBits); 
   }
 

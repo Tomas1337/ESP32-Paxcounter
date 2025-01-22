@@ -112,7 +112,6 @@ bool pax_mqtt_connect() {
     return true;
 }
 
-// Function to send all queued messages
 void send_queued_messages() {
     ESP_LOGI(MQTT_TAG, "Starting to send queued messages...");
     
@@ -132,30 +131,36 @@ void send_queued_messages() {
         ESP_LOGI(MQTT_TAG, "WiFi connected successfully!");
         
         if (pax_mqtt_connect()) {
-            // Send count data
+
+            // --- Send count data ---
+            int countDataSent = 0; 
+            int countDataFailed = 0;
             CountMessage count_msg;
             while (xQueueReceive(countQueue, &count_msg, 0) == pdTRUE) {
                 StaticJsonDocument<256> doc;
                 JsonObject data = doc.createNestedObject("data");
-                data["pax"] = count_msg.pax;
-                data["wifi"] = count_msg.wifi_count;
-                data["ble"] = count_msg.ble_count;
+                data["pax"]       = count_msg.pax;
+                data["wifi"]      = count_msg.wifi_count;
+                data["ble"]       = count_msg.ble_count;
                 data["timestamp"] = count_msg.timestamp;
                 
                 char buffer[256];
                 serializeJson(doc, buffer);
                 
                 if (mqttClient.publish(wifiConfig.mqtt_topic.c_str(), buffer)) {
-                    ESP_LOGD(MQTT_TAG, "Successfully sent count data");
+                    countDataSent++;
                 } else {
-                    ESP_LOGE(MQTT_TAG, "Failed to send count data");
+                    countDataFailed++;
                 }
-                
-                // Small delay between messages
                 vTaskDelay(pdMS_TO_TICKS(10));
             }
-            
-            // Send device data
+
+            // Log how many count messages were sent
+            ESP_LOGI(MQTT_TAG, "Successfully sent %d count data messages", countDataSent);
+            ESP_LOGI(MQTT_TAG, "Failed to send count data %d", countDataFailed);
+            // --- Send device data ---
+            int deviceDataSent = 0;
+            int deviceDataFailed = 0;
             DeviceMessage device_msg;
             while (xQueueReceive(deviceQueue, &device_msg, 0) == pdTRUE) {
                 StaticJsonDocument<256> doc;
@@ -175,27 +180,28 @@ void send_queued_messages() {
                 serializeJson(doc, buffer);
                 
                 if (mqttClient.publish((wifiConfig.mqtt_topic + "/devices").c_str(), buffer)) {
-                    ESP_LOGD(MQTT_TAG, "Successfully sent device data");
+                    deviceDataSent++;
                 } else {
-                    ESP_LOGE(MQTT_TAG, "Failed to send device data");
+                    deviceDataFailed++;
                 }
                 
                 // Small delay between messages
                 vTaskDelay(pdMS_TO_TICKS(10));
             }
-            
+
+            // Log how many device messages were sent (only once here)
+            ESP_LOGI(MQTT_TAG, "Successfully sent %d device data messages", deviceDataSent);
+            ESP_LOGI(MQTT_TAG, "Failed to send device data %d", deviceDataFailed);
+
             mqttClient.disconnect();
         }
         
         // Now check if user triggered config portal (maintenance)
         if (RTC_runmode != RUNMODE_MAINTENANCE) {
             // If still normal or sending, we can safely shut down WiFi
-            ESP_LOGI(MQTT_TAG, "Disconnecting WiFi and returning to sniffing...");
-            WiFi.disconnect(true);
-            WiFi.mode(WIFI_OFF);
-
-            // Optionally re-enable your promiscuous sniffing here
-            // e.g. libpax_counter_start() or however your code does it
+            // ESP_LOGI(MQTT_TAG, "Disconnecting WiFi and returning to sniffing...");
+            // WiFi.disconnect(true);
+            // WiFi.mode(WIFI_OFF);
             RTC_runmode = RUNMODE_NORMAL;
         } else {
             ESP_LOGW(MQTT_TAG, "Maintenance mode triggered, skipping WiFi shutdown here.");

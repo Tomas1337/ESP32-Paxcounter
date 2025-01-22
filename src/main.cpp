@@ -106,23 +106,25 @@ void print_current_time() {
 
 // Function to sync time with NTP
 bool sync_time_with_ntp() {
-    ESP_LOGI(MAIN_TAG, "Connecting to WiFi for time sync...");
+    ESP_LOGI(MAIN_TAG, "Starting NTP time sync...");
+    
+    // Ensure WiFi is in the correct mode for NTP
     WiFi.mode(WIFI_STA);
     WiFi.begin(wifiConfig.ssid.c_str(), wifiConfig.password.c_str());
     
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
         vTaskDelay(pdMS_TO_TICKS(500));
-        ESP_LOGD(MAIN_TAG, "Attempting to connect to WiFi... (%d/20)", attempts + 1);
+        ESP_LOGD(MAIN_TAG, "Attempting to connect to WiFi for NTP... (%d/20)", attempts + 1);
         attempts++;
     }
     
     if (WiFi.status() != WL_CONNECTED) {
-        ESP_LOGE(MAIN_TAG, "Failed to connect to WiFi for time sync");
+        ESP_LOGE(MAIN_TAG, "Failed to connect to WiFi for NTP sync");
         return false;
     }
     
-    ESP_LOGI(MAIN_TAG, "WiFi connected successfully!");
+    ESP_LOGI(MAIN_TAG, "WiFi connected successfully for NTP sync");
     
     // Configure NTP
     configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
@@ -140,16 +142,17 @@ bool sync_time_with_ntp() {
         localtime_r(&now, &timeinfo);
     }
     
-    // Disconnect WiFi after time sync
+    // Clean disconnect from WiFi after NTP sync
+    ESP_LOGI(MAIN_TAG, "Disconnecting WiFi after NTP sync...");
     WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
+    // WiFi.mode(WIFI_OFF);
+    delay(100);  // Short delay to ensure WiFi is fully stopped
     
     if (timeinfo.tm_year < (2024 - 1900)) {
         ESP_LOGE(MAIN_TAG, "Failed to get NTP time");
         return false;
     }
     
-    // Print the synchronized time in human readable format
     char strftime_buf[64];
     strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
     ESP_LOGI(MAIN_TAG, "Time synchronized: %s", strftime_buf);
@@ -376,6 +379,33 @@ void setup() {
 
 
   // start libpax lib (includes timer to trigger cyclic senddata)
+  ESP_LOGI(TAG, "Starting Interrupt Handler...");
+  xTaskCreatePinnedToCore(irqHandler,      // task function
+                          "irqhandler",    // name of task
+                          4096,            // stack size of task
+                          (void *)1,       // parameter of the task
+                          4,               // priority of the task
+                          &irqHandlerTask, // task handle
+                          1);              // CPU core
+
+  // starting timers and interrupts
+  _ASSERT(irqHandlerTask != NULL); // has interrupt handler task started?
+  ESP_LOGI(TAG, "Starting Timers...");
+
+  // Sync time with NTP before initializing MQTT and WiFi sniffing
+  ESP_LOGI(MAIN_TAG, "Stopping any existing WiFi operations for clean NTP sync...");
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_MODE_AP);
+  delay(100);  // Short delay to ensure WiFi is fully stopped
+
+  if (sync_time_with_ntp()) {
+      ESP_LOGI(MAIN_TAG, "Time sync successful");
+      print_current_time();
+  } else {
+      ESP_LOGE(MAIN_TAG, "Time sync failed");
+  }
+
+  // Now that NTP sync is done, initialize libpax
   ESP_LOGI(TAG, "Starting libpax...");
   struct libpax_config_t configuration;
   libpax_default_config(&configuration);
@@ -416,28 +446,6 @@ void setup() {
   ESP_LOGI(TAG, "Starting Button Controller...");
   button_init();
   ESP_LOGI(TAG, "Button Controller started");
-
-  // start state machine
-  ESP_LOGI(TAG, "Starting Interrupt Handler...");
-  xTaskCreatePinnedToCore(irqHandler,      // task function
-                          "irqhandler",    // name of task
-                          4096,            // stack size of task
-                          (void *)1,       // parameter of the task
-                          4,               // priority of the task
-                          &irqHandlerTask, // task handle
-                          1);              // CPU core
-
-  // starting timers and interrupts
-  _ASSERT(irqHandlerTask != NULL); // has interrupt handler task started?
-  ESP_LOGI(TAG, "Starting Timers...");
-
-  // Sync time with NTP before initializing MQTT
-  if (sync_time_with_ntp()) {
-      ESP_LOGI(MAIN_TAG, "Time sync successful");
-      print_current_time();
-  } else {
-      ESP_LOGE(MAIN_TAG, "Time sync failed");
-  }
 
   vTaskDelete(NULL);
 }

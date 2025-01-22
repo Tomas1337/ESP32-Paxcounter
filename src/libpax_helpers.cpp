@@ -22,6 +22,7 @@ void wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
     int8_t rssi = ppkt->rx_ctrl.rssi;
 
     // Queue device data for MQTT
+    ESP_LOGD(PAX_TAG, "WiFi packet received, MAC: %s, RSSI: %d", mac, rssi);
     pax_mqtt_enqueue_device(mac, rssi, true);
 }
 
@@ -31,6 +32,7 @@ static void ble_packet_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_para
     if (!param || param->scan_rst.search_evt != ESP_GAP_SEARCH_INQ_RES_EVT) return;
 
     // Queue device data for MQTT
+    ESP_LOGI(PAX_TAG, "BLE packet received, MAC: %s, RSSI: %d", param->scan_rst.bda, param->scan_rst.rssi);
     pax_mqtt_enqueue_device(param->scan_rst.bda, param->scan_rst.rssi, false);
 }
 
@@ -40,7 +42,7 @@ void pax_counter_callback() {
     struct count_payload_t current_count;
     if (libpax_counter_count(&current_count) == 0) {
         ESP_LOGI(PAX_TAG, "Counter callback triggered with counts - PAX: %d, WiFi: %d, BLE: %d", 
-                 current_count.pax, current_count.wifi_count, current_count.ble_count);
+                current_count.pax, current_count.wifi_count, current_count.ble_count);
         
         // Queue count data for MQTT and trigger send
         pax_mqtt_enqueue(current_count.pax, current_count.wifi_count, current_count.ble_count);
@@ -51,8 +53,12 @@ void pax_counter_callback() {
 }
 
 void init_libpax(void) {
+    // Start WIFI mode again
+    WiFi.mode(WIFI_MODE_STA);
+    WiFi.begin();
+
+
     ESP_LOGI(PAX_TAG, "Initializing libpax with callback...");
-    
     // Initialize libpax with our callback
     int result = libpax_counter_init(pax_counter_callback, &count_from_libpax, cfg.sendcycle,
                     cfg.countermode);
