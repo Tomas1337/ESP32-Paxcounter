@@ -1,269 +1,50 @@
-#include <ArduinoJson.h>
 #include "mqtthandler.h"
+#include "wificonfig.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_task_wdt.h"
 #include "libpax_helpers.h"
 #include "globals.h"
+#include "configportal.h"
+#include "button.h"
 #include <time.h>
+#include <ArduinoJson.h>
+#include <WiFi.h>
+#include <SPIFFS.h>
+#include "paxcounter.conf"
 
-#define MQTT_QUEUE_SIZE 20  // Increased from 10 to 20
+// All strings in flash
+static const char* const MQTT_TAG PROGMEM = "MQTT_HANDLER";
+static const char* const CONFIG_AP_NAME PROGMEM = "ESP32-Config";
 
-#ifndef MQTT_SERVER
-#define MQTT_SERVER MQTT_SERVER
-#endif
-
-#ifndef MQTT_PORT
-#define MQTT_PORT MQTT_PORT
-#endif
-
-#ifndef MQTT_OUTTOPIC
-#define MQTT_OUTTOPIC MQTT_OUTTOPIC
-#endif
-
-
-#ifndef MQTT_TRIGGER_PIN
-#define MQTT_TRIGGER_PIN MQTT_TRIGGER_PIN
-#endif
-
-#ifndef MQTT_TRIGGER_MODE
-#define MQTT_TRIGGER_MODE MQTT_TRIGGER_MODE
-#endif
-
-#ifndef MQTT_SEND_INTERVAL
-#define MQTT_SEND_INTERVAL MQTT_SEND_INTERVAL
-#endif
-
-static const char* MQTT_TAG = "MQTT_HANDLER";
-
-// Static task handles
-static TaskHandle_t paxMqttTaskHandle = NULL;
-
-// Timer for cyclic sending
-static TimerHandle_t mqttSendTimer = NULL;
-
-// Queue for storing messages until they are sent
-static QueueHandle_t mqttMessageQueue = NULL;
-
-// Current probe counts - protected by mutex
-static struct {
-    uint32_t pax;
-    uint32_t wifi_count;
-    uint32_t ble_count;
+// Message types for both count and device data
+struct CountMessage {
+    uint16_t pax;
+    uint16_t wifi_count;
+    uint16_t ble_count;
     uint32_t timestamp;
-} currentCounts = {0};
+} __attribute__((packed));
 
-// Device detection buffer - protected by mutex
-static struct {
-    DeviceData devices[50];  // Buffer for device detections
-    size_t count;
-} deviceBuffer = {0};
-
-static portMUX_TYPE countsMux = portMUX_INITIALIZER_UNLOCKED;
-static portMUX_TYPE deviceMux = portMUX_INITIALIZER_UNLOCKED;
-
-WiFiClient paxWifiClient;
-PubSubClient paxMqttClient(paxWifiClient);
-
-// FreeRTOS primitives
-static QueueHandle_t mqttButtonQueue = NULL;
-static QueueHandle_t mqttCyclicQueue = NULL;  // Separate queue for cyclic events
-static portMUX_TYPE mqttMux = portMUX_INITIALIZER_UNLOCKED;
-volatile bool shouldSendMQTT = false;
-
-// Message structure for the queue
-struct MQTTMessage {
-    uint32_t pax;
-    uint32_t wifi_count;
-    uint32_t ble_count;
+struct DeviceMessage {
+    uint8_t mac[6];
+    int8_t rssi;
+    bool is_wifi;
     uint32_t timestamp;
-};
+} __attribute__((packed));
 
-// ISR handler for button press
-void IRAM_ATTR buttonISR() {
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    uint32_t pressTime = millis();
-    
-    portENTER_CRITICAL_ISR(&mqttMux);
-    static uint32_t lastPressTime = 0;
-    if ((pressTime - lastPressTime) > 300) {
-        lastPressTime = pressTime;
-        xQueueSendFromISR(mqttButtonQueue, &pressTime, &xHigherPriorityTaskWoken);
-    }
-    portEXIT_CRITICAL_ISR(&mqttMux);
-    
-    if (xHigherPriorityTaskWoken) {
-        portYIELD_FROM_ISR();
-    }
-}
+// Static allocations
+TaskHandle_t paxMqttTaskHandle = NULL;
+static SemaphoreHandle_t wifiSemaphore = NULL;
+static QueueHandle_t countQueue = NULL;
+static QueueHandle_t deviceQueue = NULL;
+static wifi_mode_t wifiState = WIFI_MODE_NULL;
+static WiFiClient wifiClient;
+static PubSubClient mqttClient(wifiClient);
+static StaticJsonDocument<200> jsonDoc;
+static char jsonBuffer[200];
 
-// Function to send all queued messages
-void send_queued_messages() {
-    ESP_LOGI(MQTT_TAG, "Starting to send queued messages... Queue size: %d/%d", 
-             uxQueueMessagesWaiting(mqttMessageQueue), MQTT_QUEUE_SIZE);
-    
-    // Connect to WiFi first
-    WiFi.mode(WIFI_STA);
-    ESP_LOGI(MQTT_TAG, "Connecting to WiFi...");
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-        vTaskDelay(pdMS_TO_TICKS(500));
-        ESP_LOGI(MQTT_TAG, "Attempting to connect to WiFi... (%d)", attempts + 1);
-        attempts++;
-    }
-    
-    if (WiFi.status() == WL_CONNECTED) {
-        ESP_LOGI(MQTT_TAG, "WiFi connected successfully!");
-        
-        // Send all queued messages
-        MQTTMessage msg;
-        int messagesSent = 0;
-        while (xQueueReceive(mqttMessageQueue, &msg, 0) == pdTRUE) {
-            messagesSent++;
-            ESP_LOGI(MQTT_TAG, "Sending message %d, Queue remaining: %d/%d", 
-                     messagesSent, uxQueueMessagesWaiting(mqttMessageQueue), MQTT_QUEUE_SIZE);
-            
-            // Update current counts for sending
-            portENTER_CRITICAL(&countsMux);
-            currentCounts = {msg.pax, msg.wifi_count, msg.ble_count, msg.timestamp};
-            portEXIT_CRITICAL(&countsMux);
-            
-            // Send both count data and device detections
-            pax_mqtt_send_data();
-            pax_mqtt_send_devices();
-            
-            vTaskDelay(pdMS_TO_TICKS(100)); // Small delay between messages
-        }
-        
-        ESP_LOGI(MQTT_TAG, "Sent %d messages. Queue is now empty.", messagesSent);
-        
-        ESP_LOGI(MQTT_TAG, "Disconnecting WiFi...");
-        WiFi.disconnect(true);
-        WiFi.mode(WIFI_OFF);
-    } else {
-        ESP_LOGE(MQTT_TAG, "Failed to connect to WiFi, data not sent. Queue size remains: %d/%d",
-                 uxQueueMessagesWaiting(mqttMessageQueue), MQTT_QUEUE_SIZE);
-    }
-}
-
-void paxMqttTask(void *pvParameters) {
-    ESP_LOGI(MQTT_TAG, "MQTT Task started");
-    
-    for(;;) {
-        uint32_t eventTime;
-        BaseType_t receivedFromButton = xQueueReceive(mqttButtonQueue, &eventTime, 0);
-        BaseType_t receivedFromCyclic = xQueueReceive(mqttCyclicQueue, &eventTime, receivedFromButton ? 0 : pdMS_TO_TICKS(100));
-        
-        if (receivedFromButton || receivedFromCyclic) {
-            if (receivedFromButton) {
-                ESP_LOGI(MQTT_TAG, "Button press detected at %lu ms", eventTime);
-            } else {
-                ESP_LOGI(MQTT_TAG, "Cyclic send triggered at %lu ms", eventTime);
-            }
-            
-            send_queued_messages();
-        }
-        taskYIELD();
-    }
-}
-
-// Timer callback function
-void mqttSendTimerCallback(TimerHandle_t xTimer) {
-    if (MQTT_SEND_INTERVAL > 0) {  // Only trigger if cyclic sending is enabled
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        uint32_t currentTime = millis();
-        xQueueSendFromISR(mqttCyclicQueue, &currentTime, &xHigherPriorityTaskWoken);
-        if (xHigherPriorityTaskWoken) {
-            portYIELD_FROM_ISR();
-        }
-    }
-}
-
-void pax_mqtt_init() {
-    ESP_LOGI(MQTT_TAG, "Initializing MQTT Handler...");
-    
-    mqttButtonQueue = xQueueCreate(5, sizeof(uint32_t));
-    mqttCyclicQueue = xQueueCreate(5, sizeof(uint32_t));
-    mqttMessageQueue = xQueueCreate(MQTT_QUEUE_SIZE, sizeof(MQTTMessage));
-    
-    if (mqttButtonQueue == NULL || mqttCyclicQueue == NULL || mqttMessageQueue == NULL) {
-        ESP_LOGE(MQTT_TAG, "Failed to create queues");
-        return;
-    }
-    
-    // Create and start timer if cyclic sending is enabled
-    if (MQTT_SEND_INTERVAL > 0) {
-        mqttSendTimer = xTimerCreate(
-            "MQTTSendTimer",
-            pdMS_TO_TICKS(MQTT_SEND_INTERVAL * 1000),  // Convert seconds to milliseconds
-            pdTRUE,  // Auto reload
-            (void *)0,
-            mqttSendTimerCallback
-        );
-        
-        if (mqttSendTimer == NULL) {
-            ESP_LOGE(MQTT_TAG, "Failed to create MQTT send timer");
-        } else {
-            if (xTimerStart(mqttSendTimer, 0) != pdPASS) {
-                ESP_LOGE(MQTT_TAG, "Failed to start MQTT send timer");
-            } else {
-                ESP_LOGI(MQTT_TAG, "MQTT cyclic sending enabled, interval: %d seconds", MQTT_SEND_INTERVAL);
-            }
-        }
-    } else {
-        ESP_LOGI(MQTT_TAG, "MQTT cyclic sending disabled");
-    }
-    
-    pinMode(MQTT_TRIGGER_PIN, MQTT_TRIGGER_MODE);
-    ESP_LOGI(MQTT_TAG, "Setting up trigger button on pin %d", MQTT_TRIGGER_PIN);
-    
-    BaseType_t xReturned = xTaskCreatePinnedToCore(
-        paxMqttTask,
-        "PAX_MQTT_Task",
-        8192,
-        NULL,
-        1,
-        &paxMqttTaskHandle,
-        1
-    );
-    
-    if (xReturned != pdPASS) {
-        ESP_LOGE(MQTT_TAG, "Failed to create MQTT task");
-        return;
-    }
-    
-    attachInterrupt(digitalPinToInterrupt(MQTT_TRIGGER_PIN), buttonISR, FALLING);
-    
-    ESP_LOGI(MQTT_TAG, "MQTT Handler initialized successfully");
-}
-
-void pax_mqtt_loop() {
-    vTaskDelay(pdMS_TO_TICKS(10));
-}
-
-void pax_mqtt_enqueue(uint32_t pax_count, uint32_t wifi_count, uint32_t ble_count) {
-    MQTTMessage msg = {
-        .pax = pax_count,
-        .wifi_count = wifi_count,
-        .ble_count = ble_count,
-        .timestamp = millis()
-    };
-    
-    UBaseType_t queueCount = uxQueueMessagesWaiting(mqttMessageQueue);
-    ESP_LOGI(MQTT_TAG, "Current queue size before enqueue: %d/%d", queueCount, MQTT_QUEUE_SIZE);
-    
-    if (xQueueSend(mqttMessageQueue, &msg, 0) != pdTRUE) {
-        ESP_LOGW(MQTT_TAG, "MQTT message queue is full (%d messages), triggering send", MQTT_QUEUE_SIZE);
-        // Queue is full, trigger immediate send
-        uint32_t currentTime = millis();
-        xQueueSend(mqttCyclicQueue, &currentTime, 0);
-    } else {
-        ESP_LOGI(MQTT_TAG, "Message queued: pax=%d, wifi=%d, ble=%d (queue size now: %d/%d)", 
-                pax_count, wifi_count, ble_count, uxQueueMessagesWaiting(mqttMessageQueue), MQTT_QUEUE_SIZE);
-    }
-}
+#define COUNT_QUEUE_SIZE 10
+#define DEVICE_QUEUE_SIZE 120
 
 void pax_mqtt_enqueue_device(const uint8_t* mac, int8_t rssi, bool is_wifi) {
     if (!mac) {
@@ -271,34 +52,39 @@ void pax_mqtt_enqueue_device(const uint8_t* mac, int8_t rssi, bool is_wifi) {
         return;
     }
 
-    // Create temporary device data outside critical section
-    DeviceData tempDevice;
-    memcpy(tempDevice.mac, mac, 6);
-    tempDevice.rssi = rssi;
-    tempDevice.is_wifi = is_wifi;
-    tempDevice.timestamp = millis();
+    DeviceMessage msg;
+    memcpy(msg.mac, mac, 6);
+    msg.rssi = rssi;
+    msg.is_wifi = is_wifi;
+    time_t now;
+    time(&now); // Get the current time from the RTC/NTP
+    msg.timestamp = now;
 
-    // Minimize time in critical section
-    portENTER_CRITICAL(&deviceMux);
-    if (deviceBuffer.count < 20) {  // Increased buffer size to 50
-        deviceBuffer.devices[deviceBuffer.count] = tempDevice;
-        deviceBuffer.count++;
-        
-        // If buffer is getting full (80% capacity), trigger a send
-        if (deviceBuffer.count >= 15) {  // 80% of 50
-            portEXIT_CRITICAL(&deviceMux);
-            ESP_LOGW(MQTT_TAG, "Device buffer near full (%d devices), triggering send", deviceBuffer.count);
-            uint32_t currentTime = millis();
-            xQueueSend(mqttCyclicQueue, &currentTime, 0);
-        } else {
-            portEXIT_CRITICAL(&deviceMux);
+    if (xQueueSend(deviceQueue, &msg, 0) != pdTRUE) {
+        ESP_LOGD(MQTT_TAG, "Device queue full, dropping packet and triggering send task");
+        if (paxMqttTaskHandle) {
+            xTaskNotify(paxMqttTaskHandle, SENDCYCLE_IRQ, eSetBits);
         }
-        
-        ESP_LOGI(MQTT_TAG, "Enqueued device: Type=%s, Buffer size=%d/%d", 
-                is_wifi ? "WiFi" : "BLE", deviceBuffer.count, 50);
     } else {
-        portEXIT_CRITICAL(&deviceMux);
-        ESP_LOGW(MQTT_TAG, "Device buffer full (50 devices), dropping packet");
+        ESP_LOGD(MQTT_TAG, "Device queued: Type=%s", is_wifi ? "WiFi" : "BLE");
+    }
+}
+
+void pax_mqtt_enqueue(uint16_t pax_count, uint16_t wifi_count, uint16_t ble_count) {
+    time_t now;
+    time(&now); // Get the current time from the RTC/NTP
+    CountMessage msg = {
+        .pax = pax_count,
+        .wifi_count = wifi_count,
+        .ble_count = ble_count,
+        .timestamp = now
+    };
+    
+    if (xQueueSend(countQueue, &msg, 0) != pdTRUE) {
+        ESP_LOGW(MQTT_TAG, "Count queue full (%d messages)", COUNT_QUEUE_SIZE);
+    } else {
+        ESP_LOGD(MQTT_TAG, "Count data queued: pax=%d, wifi=%d, ble=%d", 
+                pax_count, wifi_count, ble_count);
     }
 }
 
@@ -308,12 +94,12 @@ bool pax_mqtt_connect() {
         return false;
     }
     
-    if (!paxMqttClient.connected()) {
-        ESP_LOGI(MQTT_TAG, "Connecting to MQTT broker...");
-        paxMqttClient.setServer(MQTT_SERVER, MQTT_PORT);
-        paxMqttClient.setKeepAlive(MQTT_KEEPALIVE);
+    if (!mqttClient.connected()) {
+        ESP_LOGD(MQTT_TAG, "Connecting to MQTT broker...");
+        mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
+        mqttClient.setKeepAlive(MQTT_KEEPALIVE);
         
-        if (paxMqttClient.connect(MQTT_CLIENTNAME)) {
+        if (mqttClient.connect(MQTT_CLIENTNAME)) {
             ESP_LOGI(MQTT_TAG, "Connected to MQTT broker");
             return true;
         } else {
@@ -324,94 +110,160 @@ bool pax_mqtt_connect() {
     return true;
 }
 
-void pax_mqtt_send_data() {
-    if (!pax_mqtt_connect()) {
-        ESP_LOGE(MQTT_TAG, "Cannot send data - MQTT connection failed");
-        return;
+void send_queued_messages() {
+    ESP_LOGI(MQTT_TAG, "Starting to send queued messages...");
+    
+    // Connect to WiFi first
+    WiFi.mode(WIFI_STA);
+    ESP_LOGI(MQTT_TAG, "Connecting to WiFi...");
+    WiFi.begin(wifiConfig.ssid.c_str(), wifiConfig.password.c_str());
+    
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        ESP_LOGD(MQTT_TAG, "Attempting to connect to WiFi... (%d)", attempts + 1);
+        attempts++;
     }
     
-    StaticJsonDocument<256> doc;
-    JsonObject data = doc.createNestedObject("data");
-    
-    portENTER_CRITICAL(&countsMux);
-    data["pax"] = currentCounts.pax;
-    data["wifi"] = currentCounts.wifi_count;
-    data["ble"] = currentCounts.ble_count;
-    // Use current time instead of millis
-    time_t now;
-    time(&now);
-    data["timestamp"] = now;
-    portEXIT_CRITICAL(&countsMux);
-    
-    char buffer[256];
-    serializeJson(doc, buffer);
-    
-    if (paxMqttClient.publish(MQTT_OUTTOPIC, buffer)) {
-        ESP_LOGI(MQTT_TAG, "Successfully sent count data to MQTT broker");
+    if (WiFi.status() == WL_CONNECTED) {
+        ESP_LOGI(MQTT_TAG, "WiFi connected successfully!");
+        
+        if (pax_mqtt_connect()) {
+
+            // --- Send count data ---
+            int countDataSent = 0; 
+            int countDataFailed = 0;
+            CountMessage count_msg;
+            while (xQueueReceive(countQueue, &count_msg, 0) == pdTRUE) {
+                StaticJsonDocument<256> doc;
+                JsonObject data = doc.createNestedObject("data");
+                data["pax"]       = count_msg.pax;
+                data["wifi"]      = count_msg.wifi_count;
+                data["ble"]       = count_msg.ble_count;
+                data["timestamp"] = count_msg.timestamp;
+                
+                char buffer[256];
+                serializeJson(doc, buffer);
+                
+                if (mqttClient.publish(wifiConfig.mqtt_topic.c_str(), buffer)) {
+                    countDataSent++;
+                } else {
+                    countDataFailed++;
+                }
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+
+            // Log how many count messages were sent
+            ESP_LOGI(MQTT_TAG, "Successfully sent %d count data messages", countDataSent);
+            ESP_LOGI(MQTT_TAG, "Failed to send count data %d", countDataFailed);
+            // --- Send device data ---
+            int deviceDataSent = 0;
+            int deviceDataFailed = 0;
+            DeviceMessage device_msg;
+            while (xQueueReceive(deviceQueue, &device_msg, 0) == pdTRUE) {
+                StaticJsonDocument<256> doc;
+                JsonObject device = doc.createNestedObject("device");
+                
+                char mac[18];
+                snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x",
+                        device_msg.mac[0], device_msg.mac[1], device_msg.mac[2],
+                        device_msg.mac[3], device_msg.mac[4], device_msg.mac[5]);
+                
+                device["mac"] = mac;
+                device["rssi"] = device_msg.rssi;
+                device["type"] = device_msg.is_wifi ? "wifi" : "ble";
+                device["timestamp"] = device_msg.timestamp;
+                
+                char buffer[256];
+                serializeJson(doc, buffer);
+                
+                if (mqttClient.publish((wifiConfig.mqtt_topic + "/devices").c_str(), buffer)) {
+                    deviceDataSent++;
+                } else {
+                    deviceDataFailed++;
+                }
+                
+                // Small delay between messages
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+
+            // Log how many device messages were sent (only once here)
+            ESP_LOGI(MQTT_TAG, "Successfully sent %d device data messages", deviceDataSent);
+            ESP_LOGI(MQTT_TAG, "Failed to send device data %d", deviceDataFailed);
+
+            mqttClient.disconnect();
+        }
+        
+        // Now check if user triggered config portal (maintenance)
+        if (RTC_runmode != RUNMODE_MAINTENANCE) {
+            // If still normal or sending, we can safely shut down WiFi
+            // ESP_LOGI(MQTT_TAG, "Disconnecting WiFi and returning to sniffing...");
+            // WiFi.disconnect(true);
+            // WiFi.mode(WIFI_OFF);
+            RTC_runmode = RUNMODE_NORMAL;
+        } else {
+            ESP_LOGW(MQTT_TAG, "Maintenance mode triggered, skipping WiFi shutdown here.");
+        }
+        
     } else {
-        ESP_LOGE(MQTT_TAG, "Failed to publish count data to MQTT broker");
+        ESP_LOGE(MQTT_TAG, "Failed to connect to WiFi");
     }
 }
 
-void pax_mqtt_send_devices() {
-    if (!pax_mqtt_connect()) {
-        return;
-    }
-    
-    // Copy data we want to send while in critical section
-    DeviceData devices_to_send[50];
-    size_t count;
-    
-    portENTER_CRITICAL(&deviceMux);
-    count = deviceBuffer.count;
-    memcpy(devices_to_send, deviceBuffer.devices, count * sizeof(DeviceData));
-    deviceBuffer.count = 0;  // Clear buffer after copying
-    portEXIT_CRITICAL(&deviceMux);
-    
-    // Now send each device outside of critical section
-    for (size_t i = 0; i < count; i++) {
-        StaticJsonDocument<256> doc;
-        JsonObject device = doc.createNestedObject("device");
-        
-        char mac[18];
-        snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x",
-                devices_to_send[i].mac[0], devices_to_send[i].mac[1],
-                devices_to_send[i].mac[2], devices_to_send[i].mac[3],
-                devices_to_send[i].mac[4], devices_to_send[i].mac[5]);
-        
-        device["mac"] = mac;
-        device["rssi"] = devices_to_send[i].rssi;
-        device["type"] = devices_to_send[i].is_wifi ? "wifi" : "ble";
-        // Use current time instead of millis
-        time_t now;
-        time(&now);
-        device["timestamp"] = now;
-        
-        char buffer[256];
-        serializeJson(doc, buffer);
-        
-        // Allow other tasks to run between publishes
-        vTaskDelay(pdMS_TO_TICKS(10));
-        
-        if (paxMqttClient.publish(MQTT_DEVICE_TOPIC, buffer)) {
-            ESP_LOGI(MQTT_TAG, "Successfully sent device data to MQTT broker");
-        } else {
-            ESP_LOGE(MQTT_TAG, "Failed to publish device data to MQTT broker");
-            // Try to reconnect if we lost connection
-            if (!pax_mqtt_connect()) {
-                ESP_LOGE(MQTT_TAG, "Lost MQTT connection and failed to reconnect");
-                break;
+// MQTT task that handles sending queued messages
+static void mqtt_task(void* parameter) {
+    uint32_t ulNotificationValue;
+    const TickType_t xMaxBlockTime = pdMS_TO_TICKS(60000); // 60 second timeout
+
+    for (;;) {
+        // Check for maintenance mode
+        if (RTC_runmode == RUNMODE_MAINTENANCE) {
+            ESP_LOGI(MQTT_TAG, "Entering maintenance mode (config portal)");
+            startConfigPortal(); // Start the configuration portal
+            continue; // Skip the rest of the loop
+        }
+
+        // Wait for notification from setSendIRQ
+        if (xTaskNotifyWait(0x00, ULONG_MAX, &ulNotificationValue, xMaxBlockTime) == pdTRUE) {
+            if (ulNotificationValue & SENDCYCLE_IRQ) {
+                ESP_LOGD(MQTT_TAG, "Send IRQ received, processing queued messages");
+                send_queued_messages();
             }
         }
+        // Small task delay to prevent watchdog triggers
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
-    
-    paxMqttClient.disconnect();
 }
 
-// Hook function implementation for WiFi sniffer
-void IRAM_ATTR wifi_packet_handler_hook(uint8_t* mac, int8_t rssi) {
-    if (!mac) return;
+void pax_mqtt_init() {
+    wifiSemaphore = xSemaphoreCreateMutex();
+    countQueue = xQueueCreate(COUNT_QUEUE_SIZE, sizeof(CountMessage));
+    deviceQueue = xQueueCreate(DEVICE_QUEUE_SIZE, sizeof(DeviceMessage));
     
-    // Minimize logging in ISR context
-    pax_mqtt_enqueue_device(mac, rssi, true);
+    if (!wifiSemaphore || !countQueue || !deviceQueue) {
+        ESP_LOGE(MQTT_TAG, "Failed to create MQTT resources");
+        return;
+    }
+
+    // Create MQTT task
+    BaseType_t result = xTaskCreatePinnedToCore(
+        mqtt_task,          // Task function
+        "mqtt_task",        // Task name
+        8192,              // Stack size (bytes)
+        NULL,              // Parameter to pass
+        1,                 // Task priority
+        &paxMqttTaskHandle,// Task handle
+        1                  // Core ID (1 = non-protocol CPU)
+    );
+
+    if (result != pdPASS) {
+        ESP_LOGE(MQTT_TAG, "Failed to create MQTT task");
+        return;
+    }
+
+    ESP_LOGI(MQTT_TAG, "MQTT Handler initialized successfully");
+}
+
+void pax_mqtt_loop() {
+    vTaskDelay(pdMS_TO_TICKS(10));
 } 

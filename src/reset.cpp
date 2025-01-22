@@ -1,6 +1,7 @@
 // Basic Config
 #include "globals.h"
 #include "reset.h"
+#include "wificonfig.h"
 
 // Conversion factor for micro seconds to seconds
 #define uS_TO_S_FACTOR 1000000ULL
@@ -66,6 +67,13 @@ void do_after_reset(void) {
 
   // read (and initialize on first run) runtime settings from NVRAM
   loadConfig();
+  
+  // Load WiFi configuration from SPIFFS
+  if (loadWiFiConfig()) {
+    ESP_LOGD(TAG, "WiFi configuration loaded from SPIFFS");
+  } else {
+    ESP_LOGD(TAG, "Using default WiFi configuration");
+  }
 
   // set time zone to user value from paxcounter.conf
 #ifdef TIME_SYNC_TIMEZONE

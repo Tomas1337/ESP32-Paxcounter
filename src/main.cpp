@@ -78,14 +78,19 @@ BME_IRQ         <- setBMEIRQ() <- Ticker.h
 
 // Basic Config
 #include "main.h"
+#include "globals.h"
+#include "configportal.h"
 #include "mqtthandler.h"
-#include <time.h>
+#include "wificonfig.h"
+#include <SPIFFS.h>
+#include <ArduinoJson.h>
+#include "button.h"
 
 // NTP Server settings
 #define NTP_SERVER "time.google.com"
 #define GMT_OFFSET_SEC 3600      // GMT+1 for CET
 #define DAYLIGHT_OFFSET_SEC 3600 // +1 hour for summer time
-
+#define HAS_BUTTON 0
 static const char* MAIN_TAG = "MAIN";
 
 // Function to print current time in human readable format
@@ -101,23 +106,25 @@ void print_current_time() {
 
 // Function to sync time with NTP
 bool sync_time_with_ntp() {
-    ESP_LOGI(MAIN_TAG, "Connecting to WiFi for time sync...");
+    ESP_LOGI(MAIN_TAG, "Starting NTP time sync...");
+    
+    // Ensure WiFi is in the correct mode for NTP
     WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    WiFi.begin(wifiConfig.ssid.c_str(), wifiConfig.password.c_str());
     
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
         vTaskDelay(pdMS_TO_TICKS(500));
-        ESP_LOGI(MAIN_TAG, "Attempting to connect to WiFi... (%d/20)", attempts + 1);
+        ESP_LOGD(MAIN_TAG, "Attempting to connect to WiFi for NTP... (%d/20)", attempts + 1);
         attempts++;
     }
     
     if (WiFi.status() != WL_CONNECTED) {
-        ESP_LOGE(MAIN_TAG, "Failed to connect to WiFi for time sync");
+        ESP_LOGE(MAIN_TAG, "Failed to connect to WiFi for NTP sync");
         return false;
     }
     
-    ESP_LOGI(MAIN_TAG, "WiFi connected successfully!");
+    ESP_LOGI(MAIN_TAG, "WiFi connected successfully for NTP sync");
     
     // Configure NTP
     configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
@@ -129,22 +136,23 @@ bool sync_time_with_ntp() {
     const int retry_count = 10;
     
     while(timeinfo.tm_year < (2024 - 1900) && ++retry < retry_count) {
-        ESP_LOGI(MAIN_TAG, "Waiting for NTP time... (%d/%d)", retry, retry_count);
+        ESP_LOGD(MAIN_TAG, "Waiting for NTP time... (%d/%d)", retry, retry_count);
         delay(2000);
         time(&now);
         localtime_r(&now, &timeinfo);
     }
     
-    // Disconnect WiFi after time sync
+    // Clean disconnect from WiFi after NTP sync
+    ESP_LOGI(MAIN_TAG, "Disconnecting WiFi after NTP sync...");
     WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
+    // WiFi.mode(WIFI_OFF);
+    delay(100);  // Short delay to ensure WiFi is fully stopped
     
     if (timeinfo.tm_year < (2024 - 1900)) {
         ESP_LOGE(MAIN_TAG, "Failed to get NTP time");
         return false;
     }
     
-    // Print the synchronized time in human readable format
     char strftime_buf[64];
     strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
     ESP_LOGI(MAIN_TAG, "Time synchronized: %s", strftime_buf);
@@ -168,27 +176,27 @@ char clientId[20] = {0}; // unique ClientID
 
 void setup() {
   char features[100] = "";
+  #ifdef HAS_BUTTON
+    strcat_P(features, " BTN");
+  #endif
 
-  // Reduce power consumption (optional)
-  // This reduces the power consumption with about 50 mWatt.
-  // Typically a TTGO T-beam v1.0 uses 660 mWatt when the CPU frequency is set to 80 MHz.
-  // When left running at 240 mHz, the power consumption is about 710 - 730 mWatt.
-  // Higher CPU speed may be preferred for wifi & ble sniffing.
-  //
-  // setCpuFrequencyMhz(80);
-
-  // disable brownout detection
-#ifdef DISABLE_BROWNOUT
-  // register with brownout is at address DR_REG_RTCCNTL_BASE + 0xd4
-  (*((uint32_t volatile *)ETS_UNCACHED_ADDR((DR_REG_RTCCNTL_BASE + 0xd4)))) = 0;
-#endif
-
+  // Initialize SPIFFS for configuration storage
+  if (!SPIFFS.begin(true)) {
+      ESP_LOGE(TAG, "Failed to mount SPIFFS");
+  }
+  
   // hash 6 byte device MAC to 4 byte clientID
   uint8_t mac[6];
   esp_read_mac(mac, ESP_MAC_WIFI_STA);
 
   const uint32_t hashedmac = myhash((const char *)mac, 6);
   snprintf(clientId, 20, "paxcounter_%08x", hashedmac);
+
+  // disable brownout detection
+#ifdef DISABLE_BROWNOUT
+  // register with brownout is at address DR_REG_RTCCNTL_BASE + 0xd4
+  (*((uint32_t volatile *)ETS_UNCACHED_ADDR((DR_REG_RTCCNTL_BASE + 0xd4)))) = 0;
+#endif
 
   // setup debug output or silence device
 #if (VERBOSE)
@@ -209,7 +217,7 @@ void setup() {
   do_after_reset();
 
   ESP_LOGI(TAG, "Starting %s v%s (runmode=%d / restarts=%d)", clientId,
-           PROGVERSION, RTC_runmode, RTC_restarts);
+          PROGVERSION, RTC_runmode, RTC_restarts);
   ESP_LOGI(TAG, "code build date: %d", compileTime());
 
   // print chip information on startup if in verbose mode after coldstart
@@ -369,11 +377,35 @@ void setup() {
   strcat_P(features, " IF482");
 #endif
 
-  // start local webserver on rcommand request
-  if (RTC_runmode == RUNMODE_MAINTENANCE)
-    start_boot_menu();
 
   // start libpax lib (includes timer to trigger cyclic senddata)
+  ESP_LOGI(TAG, "Starting Interrupt Handler...");
+  xTaskCreatePinnedToCore(irqHandler,      // task function
+                          "irqhandler",    // name of task
+                          4096,            // stack size of task
+                          (void *)1,       // parameter of the task
+                          4,               // priority of the task
+                          &irqHandlerTask, // task handle
+                          1);              // CPU core
+
+  // starting timers and interrupts
+  _ASSERT(irqHandlerTask != NULL); // has interrupt handler task started?
+  ESP_LOGI(TAG, "Starting Timers...");
+
+  // Sync time with NTP before initializing MQTT and WiFi sniffing
+  ESP_LOGI(MAIN_TAG, "Stopping any existing WiFi operations for clean NTP sync...");
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_MODE_AP);
+  delay(100);  // Short delay to ensure WiFi is fully stopped
+
+  if (sync_time_with_ntp()) {
+      ESP_LOGI(MAIN_TAG, "Time sync successful");
+      print_current_time();
+  } else {
+      ESP_LOGE(MAIN_TAG, "Time sync failed");
+  }
+
+  // Now that NTP sync is done, initialize libpax
   ESP_LOGI(TAG, "Starting libpax...");
   struct libpax_config_t configuration;
   libpax_default_config(&configuration);
@@ -396,55 +428,29 @@ void setup() {
   if (config_update != 0) {
     ESP_LOGE(TAG, "Error in libpax configuration.");
   } else {
+    pax_mqtt_init();
     init_libpax();
   }
 
   // start rcommand processing task
   ESP_LOGI(TAG, "Starting rcommand interpreter...");
   rcmd_init();
-
-  // cyclic function interrupts
-  ESP_LOGI(TAG, "Attaching cyclic timer...");
-  cyclicTimer.attach(HOMECYCLE, setCyclicIRQ);
-  ESP_LOGI(TAG, "Cyclic timer attached");
-
+  
   // show compiled features
   ESP_LOGI(TAG, "Features:%s", features);
 
   // set runmode to normal
   RTC_runmode = RUNMODE_NORMAL;
 
-  // start state machine
-  ESP_LOGI(TAG, "Starting Interrupt Handler...");
-  xTaskCreatePinnedToCore(irqHandler,      // task function
-                          "irqhandler",    // name of task
-                          4096,            // stack size of task
-                          (void *)1,       // parameter of the task
-                          4,               // priority of the task
-                          &irqHandlerTask, // task handle
-                          1);              // CPU core
-
-  // starting timers and interrupts
-  _ASSERT(irqHandlerTask != NULL); // has interrupt handler task started?
-  ESP_LOGI(TAG, "Starting Timers...");
-
-  // Sync time with NTP before initializing MQTT
-  if (sync_time_with_ntp()) {
-      ESP_LOGI(MAIN_TAG, "Time sync successful");
-      print_current_time();
-  } else {
-      ESP_LOGE(MAIN_TAG, "Time sync failed");
-  }
-
-  // Initialize MQTT handler
-  pax_mqtt_init();
+  // Initialize button controller before IRQ handler
+  ESP_LOGI(TAG, "Starting Button Controller...");
+  button_init();
+  ESP_LOGI(TAG, "Button Controller started");
 
   vTaskDelete(NULL);
-} // setup()
+}
 
 void loop() {
-  // Handle MQTT operations
-  pax_mqtt_loop();
-  
-  vTaskDelete(NULL);
+  // Give other tasks time to run
+  vTaskDelay(pdMS_TO_TICKS(10));
 }

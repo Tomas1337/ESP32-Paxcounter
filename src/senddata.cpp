@@ -2,7 +2,9 @@
 #include "senddata.h"
 #include "mqtthandler.h"
 
-void setSendIRQ(void) { xTaskNotify(irqHandlerTask, SENDCYCLE_IRQ, eSetBits); }
+void setSendIRQ(void) { 
+  xTaskNotify(paxMqttTaskHandle, SENDCYCLE_IRQ, eSetBits); 
+  }
 
 // put data to send in RTos Queues used for transmit over channels Lora and SPI
 void SendPayload(uint8_t port) {
@@ -63,12 +65,12 @@ void sendData() {
   sdsStatus_t sds_status;
 #endif
   struct count_payload_t count =
-      count_from_libpax; // copy values from global libpax var
-  ESP_LOGD(TAG, "Sending count results: pax=%d / wifi=%d / ble=%d", count.pax,
-           count.wifi_count, count.ble_count);
+    count_from_libpax; // copy values from global libpax var
+    ESP_LOGD(TAG, "Sending count results: pax=%d / wifi=%d / ble=%d", count.pax,
+      count.wifi_count, count.ble_count);
 
   // Enqueue data for MQTT - this will trigger the MQTT task to send
-  pax_mqtt_enqueue(count.pax, count.wifi_count, count.ble_count);
+  // pax_mqtt_enqueue(count.pax, count.wifi_count, count.ble_count);
 
   while (bitmask) {
     switch (bitmask & mask) {

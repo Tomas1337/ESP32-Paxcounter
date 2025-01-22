@@ -2,50 +2,46 @@
 
 #include "globals.h"
 #include "button.h"
+#include "configportal.h"
+#include "esp_log.h"
 
+static volatile uint8_t buttonPressCount = 0;
+static volatile uint32_t lastButtonPress = 0;
+static const char* const BUTTON_TAG = "BUTTON";
 
-OneButton button(HAS_BUTTON, !BUTTON_ACTIVEHIGH, !!BUTTON_PULLUP);
-TaskHandle_t buttonLoopTask;
-
-void IRAM_ATTR readButton(void) { button.tick(); }
-
-void singleClick(void) {
-#ifdef HAS_DISPLAY
-  dp_refresh(true); // switch to next display page
-#endif
-#ifdef HAS_MATRIX_DISPLAY
-  refreshTheMatrixDisplay(true); // switch to next display page
-#endif
+// Keep only the ISR in IRAM
+void IRAM_ATTR handle_button_press() {
+    uint32_t now = millis();
+    if ((now - lastButtonPress) > 300) {
+        lastButtonPress = now;
+        buttonPressCount++;
+        
+        // Check if we've reached 5 presses within the time window
+        if (buttonPressCount == 5) {
+            // Set maintenance mode - this will be handled by cyclic task
+            RTC_runmode = RUNMODE_MAINTENANCE;
+            buttonPressCount = 0;  // Reset the count
+        }
+    }
 }
 
-void longPressStart(void) {
-  payload.reset();
-  payload.addButton(0x01);
-  SendPayload(BUTTONPORT);
+// Regular functions don't need IRAM
+int get_button_press_count() {
+    return buttonPressCount;
 }
 
-void buttonLoop(void *parameter) {
-  while (1) {
-    doIRQ(BUTTON_IRQ);
-    delay(50); // 50 is debounce time of OneButton lib, so doesn't hurt
-  }
+void reset_button_press_count() {
+    // Reset count after a timeout period
+    uint32_t now = millis();
+    if ((now - lastButtonPress) > 5000) { // 5 second timeout
+        buttonPressCount = 0;
+    }
 }
 
 void button_init(void) {
-  ESP_LOGI(TAG, "Starting button Controller...");
-  xTaskCreatePinnedToCore(buttonLoop,      // task function
-                          "buttonloop",    // name of task
-                          2048,            // stack size of task
-                          (void *)1,       // parameter of the task
-                          2,               // priority of the task
-                          &buttonLoopTask, // task handle
-                          1);              // CPU core
-
-  button.setPressMs(1000);
-  button.attachClick(singleClick);
-  button.attachLongPressStart(longPressStart);
-
-  attachInterrupt(digitalPinToInterrupt(HAS_BUTTON), readButton, CHANGE);
-};
+    pinMode(HAS_BUTTON, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(HAS_BUTTON), handle_button_press, FALLING);
+    ESP_LOGI(BUTTON_TAG, "Button handler initialized on pin %d", HAS_BUTTON);
+}
 
 #endif
