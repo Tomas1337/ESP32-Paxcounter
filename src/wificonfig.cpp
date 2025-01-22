@@ -37,7 +37,7 @@ bool loadWiFiConfig() {
     wifiConfig.mqtt_port = doc["mqtt_port"] | MQTT_PORT;  // Use default if not specified
 
     ESP_LOGI(WIFI_TAG, "Loaded WiFi config - SSID: %s, MQTT Server: %s", 
-             wifiConfig.ssid.c_str(), wifiConfig.mqtt_server.c_str());
+            wifiConfig.ssid.c_str(), wifiConfig.mqtt_server.c_str());
     return true;
 }
 

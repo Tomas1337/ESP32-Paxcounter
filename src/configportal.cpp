@@ -11,7 +11,7 @@ bool portalActive = false;
 WiFiManager wifiManager;
 
 // Custom parameters for MQTT configuration
-WiFiManagerParameter custom_mqtt_server("mqtt_server", "MQTT Server", "", 20);
+WiFiManagerParameter custom_mqtt_server("mqtt_server", "MQTT Server", "139.162.20.204", 20);
 WiFiManagerParameter custom_mqtt_port("mqtt_port", "MQTT Port", "1883", 6);
 WiFiManagerParameter custom_mqtt_topic("mqtt_topic", "MQTT Topic", "wif-counter/generic_location/generic_room/s01", 60);
 
