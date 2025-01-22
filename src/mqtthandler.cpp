@@ -43,10 +43,8 @@ static PubSubClient mqttClient(wifiClient);
 static StaticJsonDocument<200> jsonDoc;
 static char jsonBuffer[200];
 
-#define COUNT_QUEUE_SIZE 30
-#define DEVICE_QUEUE_SIZE 100
-
-
+#define COUNT_QUEUE_SIZE 10
+#define DEVICE_QUEUE_SIZE 120
 
 void pax_mqtt_enqueue_device(const uint8_t* mac, int8_t rssi, bool is_wifi) {
     if (!mac) {
